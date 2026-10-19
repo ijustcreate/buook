@@ -2,9 +2,15 @@
 
 A local-first, editable pixel-art book for Windows, built with Electron and Canvas. Worn parchment, curved page stacks, customizable covers, a spine-view shelf, and loose or taped keepsakes.
 
+## Play in your browser
+
+[**Open buook — public web app**](https://buook.felix13.chatgpt.site)
+
+No installation or account is required. The browser version uses the same book renderer and editing tools as the desktop app. Your shelf is saved **in your current browser on this device**, not on a public server. Desktop and browser shelves are separate; clearing browser data removes that browser’s saved books. Keep the same web address to return to the same shelf.
+
 The approved working checkpoint is **v1.0.11**. The desktop application currently appears as **The Book**; its application ID and save location are intentionally unchanged so existing books keep working.
 
-The current development version is **v1.0.12**, adding correct first-leaf stack thickness, golden paper edges on both stack faces, and a custom generated desktop icon. The `v1.0.11` checkpoint is preserved unchanged.
+The current development version is **v1.0.13**, adding correct first-leaf stack thickness, golden paper edges on both stack faces, a custom generated desktop icon, and closed views with two covers and a parallel paper block. The `v1.0.11` checkpoint is preserved unchanged.
 
 ## Inspiration and credit
 
@@ -50,6 +56,15 @@ pnpm start
 
 Do not open `index.html` directly as a local file. Electron serves the bundled assets through the app's `book://app/` protocol.
 
+To run the browser version locally instead:
+
+```sh
+pnpm run build:web
+pnpm run web
+```
+
+Open the printed local URL (`http://127.0.0.1:4174` by default). `build:web` copies only the shared renderer and artwork into `dist/`—no Electron executable, credentials, or saved books. Any static HTTPS host can serve that directory. The public deployment uses Sites; its project identity is retained in `.openai/hosting.json`.
+
 Build Windows packages:
 
 ```sh
@@ -74,6 +89,7 @@ node scripts/verify-insert-transfer.cjs
 node scripts/verify-edge-alpha.cjs
 node scripts/verify-stack-edges.cjs
 node scripts/verify-book-layers.cjs
+node scripts/verify-web.cjs http://127.0.0.1:4174/
 ```
 
 Set `BOOK_ASSERT_PICKUP=1` for first-frame pixel assertions. Set `BOOK_QA_EXE` to a packaged executable to check that build instead of the development app. `BOOK_VISIBILITY_STEPS` controls the insert suite's pixel-sampling density.

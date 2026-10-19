@@ -1,11 +1,13 @@
 {
   "name": "the-keepers-book",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "private": true,
   "description": "A local, editable keeper's book.",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
+    "web": "node scripts/serve-web.cjs",
+    "build:web": "node scripts/build-web.cjs",
     "dist": "electron-builder --win nsis portable"
   },
   "devDependencies": {

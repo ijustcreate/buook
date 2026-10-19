@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.13 — 2026-10-19
+
+- Added the opposite board beneath the closed book’s page block for both front and back views.
+- Rebuilt the closed paper block between parallel board planes, inset inside their edges; removed its red overlay and leather-colored lower band.
+- Matched cover art to its opaque bounds instead of stretching its transparent margins across the cover plane.
+- Included the far board in the shared-camera spine view.
+- Added a public browser build, README launch link, reproducible static build/local preview, and browser page-turn/shelf-persistence checks.
+
 ## 1.0.12 — 2026-10-19
 
 - Removed the phantom underlying stack beneath the first landed leaf on either side; underlying layers begin with the second leaf.

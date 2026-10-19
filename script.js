@@ -887,6 +887,12 @@ function drawSpineView() {
   ctx.save();ctx.imageSmoothingEnabled=false;
   ctx.save();ctx.fillStyle='rgba(0,0,0,.42)';ctx.shadowColor='rgba(0,0,0,.5)';ctx.shadowBlur=13;
   ctx.beginPath();ctx.ellipse(CX,558,(maxX-minX)*scale*.61,12,0,0,Math.PI*2);ctx.fill();ctx.restore();
+  // Both boards belong to the same camera. The far board is mostly hidden by
+  // the front board and spine, but its head/tail edges complete the binding.
+  const farBoard=[camera(0,0,-depth/2),camera(width,0,-depth/2),camera(width,height,-depth/2),camera(0,height,-depth/2)].map(screen);
+  const farUV=opaqueBounds(assets.back);
+  quad(assets.back,[{x:farUV.left,y:farUV.top},{x:farUV.right,y:farUV.top},
+    {x:farUV.right,y:farUV.bottom},{x:farUV.left,y:farUV.bottom}],farBoard);
   // A board has a narrow leather bevel, not a second cover-sized backing slab.
   const bevel=[camera(0,0,depth/2-5),camera(width,0,depth/2-5),board[1],board[0]].map(screen);
   ctx.fillStyle=coverInk(.55);path(bevel);ctx.fill();
@@ -923,6 +929,20 @@ function redrawInsideCorner(side) {
   cover({x:side<0?0:912,y:400,w:112,h:165},assets.hardware);
 }
 
+function closedBookLayers(points,amount) {
+  const visibility=smooth((amount-.72)/.28);
+  const depth=(12+22*pageThickness())*visibility;
+  const farBoard=points.map(p=>({x:p.x,y:p.y+depth+5*visibility}));
+  // The page block is seated between two parallel boards. Its lower edge is
+  // the same line as the upper edge, translated in depth, never a wedge.
+  const a=points[3].x<points[2].x?points[3]:points[2];
+  const b=points[3].x<points[2].x?points[2]:points[3];
+  const inset=Math.min(.08,12/Math.max(1,b.x-a.x));
+  const left={x:mix(a.x,b.x,inset),y:mix(a.y,b.y,inset)-2*visibility};
+  const right={x:mix(a.x,b.x,1-inset),y:mix(a.y,b.y,1-inset)-2*visibility};
+  return {visibility,depth,farBoard,paper:[left,right,{x:right.x,y:right.y+depth},{x:left.x,y:left.y+depth}]};
+}
+
 function drawCoverScene() {
   const edge=coverMotion?coverMotion.edge:closedFlipMotion?(closedFlipMotion.progress<.5?closedFlipMotion.from:closedFlipMotion.to):closedEdge;
   const amount=coverMotion?coverMotion.amount:1;
@@ -950,36 +970,23 @@ function drawCoverScene() {
   const bottomWidth=Math.abs(coverPoint(openOuter,565).x-coverPoint(seam,565).x);
   const points=[hingeTop,{x:hingeTop.x+side*topWidth*Math.cos(angle),y:134-lift},
     {x:hingeBottom.x+side*bottomWidth*Math.cos(angle),y:624-lift},hingeBottom];
-    const thickness=pageThickness();
-  const stackTop=points[2].y-28*depthAlpha*thickness,stackBottom=points[2].y+4*depthAlpha*thickness;
-  const stackLeft=Math.min(points[2].x,points[3].x)+14*depthAlpha;
-  const stackRight=Math.max(points[2].x,points[3].x)-14*depthAlpha;
+  const layers=closedBookLayers(points,amount);
   if(depthAlpha>0) {
     ctx.save();ctx.globalAlpha=depthAlpha;
-    ctx.save();ctx.beginPath();ctx.moveTo(stackLeft,stackTop);ctx.lineTo(stackRight,stackTop);
-    ctx.lineTo(stackRight,stackBottom);ctx.lineTo(stackLeft,stackBottom);ctx.closePath();ctx.clip();
-    ctx.fillStyle='#d9a45d';ctx.fill();
-    quad(assets.stack,[{x:0,y:0},{x:assets.stack.width,y:0},{x:assets.stack.width,y:assets.stack.height},{x:0,y:assets.stack.height}],
-      [{x:stackLeft,y:stackTop},{x:stackRight,y:stackTop},
-       {x:stackRight,y:stackBottom},{x:stackLeft,y:stackBottom}]);
-    ctx.globalCompositeOperation='source-atop';ctx.fillStyle='rgba(88,39,47,.2)';
-    ctx.fillRect(stackLeft,stackTop,stackRight-stackLeft,stackBottom-stackTop);
-    ctx.globalCompositeOperation='source-over';
-    const lineCount=Math.max(2,Math.round(pageCount/4));
-    for(let i=1;i<lineCount;i++) {
-      const y=mix(stackTop,stackBottom,i/lineCount);
-      ctx.strokeStyle=i%2?'rgba(255,224,151,.72)':'rgba(102,54,39,.56)';ctx.lineWidth=1;
-      ctx.beginPath();ctx.moveTo(stackLeft+3,y);ctx.lineTo(stackRight-3,y);ctx.stroke();
-    }
-    const bandY=stackBottom-6*depthAlpha*thickness;
-    quad(assets.leather,[{x:0,y:10},{x:assets.leather.width,y:10},{x:assets.leather.width,y:82},{x:0,y:82}],
-      [{x:stackLeft,y:bandY},{x:stackRight,y:bandY},{x:stackRight,y:bandY+7*depthAlpha*thickness},{x:stackLeft,y:bandY+7*depthAlpha*thickness}]);
-    ctx.restore();
+    const farImage=edge==='front'?assets.back:assets.front,bounds=opaqueBounds(farImage);
+    quad(farImage,[{x:bounds.left,y:bounds.top},{x:bounds.right,y:bounds.top},
+      {x:bounds.right,y:bounds.bottom},{x:bounds.left,y:bounds.bottom}],layers.farBoard);
+    ctx.fillStyle='#d9a45d';path(layers.paper);ctx.fill();
+    const paperBounds=opaqueBounds(assets.stack),paperInset=assets.stack.width*.018;
+    quad(assets.stack,[{x:paperBounds.left+paperInset,y:paperBounds.top+3},{x:paperBounds.right-paperInset,y:paperBounds.top+3},
+      {x:paperBounds.right-paperInset,y:paperBounds.bottom-3},{x:paperBounds.left+paperInset,y:paperBounds.bottom-3}],
+      layers.paper);
     ctx.restore();
   }
   const outside=amount>=.5,faceSide=outside?-side:side;
   const image=outside?(edge==='front'?assets.front:assets.back):(edge==='front'?assets.insideFront:assets.insideBack);
-  const minU=0,maxU=image.width;
+  const bounds=outside?opaqueBounds(image):{left:0,top:0,right:image.width,bottom:image.height};
+  const minU=bounds.left,maxU=bounds.right;
   const u0=faceSide<0?maxU:minU,u1=faceSide<0?minU:maxU;
   if(outside) {
     const width=(10+pageCount*.15)*smooth((amount-.5)/.5),spine=assets.closedSpine;
@@ -988,7 +995,7 @@ function drawCoverScene() {
       {x:side<0?spine.width:0,y:spine.height},{x:side<0?0:spine.width,y:spine.height}],
       [top,points[0],points[3],bottom]);
   }
-  quad(image,[{x:u0,y:0},{x:u1,y:0},{x:u1,y:image.height},{x:u0,y:image.height}],points);
+  quad(image,[{x:u0,y:bounds.top},{x:u1,y:bounds.top},{x:u1,y:bounds.bottom},{x:u0,y:bounds.bottom}],points);
   if(outside)paintCoverCustomization(edge,points);
   ctx.restore();
   ctx.restore();
