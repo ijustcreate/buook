@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Book</title>
+  <link rel="stylesheet" href="style.css?v=22">
+</head>
+<body>
+  <main>
+    <header><span>THE ARCHIVE</span><h1>A keeper’s book</h1></header>
+    <div class="book-stage">
+      <canvas id="book" width="1000" height="680" aria-label="Interactive book. Drag a page corner or use the arrow buttons to turn pages." tabindex="0"></canvas>
+      <p id="loading" role="status">Opening the book…</p>
+    </div>
+    <nav aria-label="Book navigation">
+      <button id="previous" aria-label="Previous spread">←</button>
+      <output id="pagination" aria-live="polite">1 — 2 / 28</output>
+      <button id="next" aria-label="Next spread">→</button>
+    </nav>
+    <button id="close-book" class="close-book">Close book</button>
+    <button id="flip-closed" class="close-book" hidden>Flip to back cover</button>
+    <button id="spine-view" class="close-book">View spine</button>
+    <button id="shelf-open" class="close-book">My shelf</button>
+    <p class="hint">Drag a page to turn it · ← → arrow keys</p>
+    <details class="book-options"><summary>Book options</summary><div class="options">
+      <label>Pages <input id="page-count" type="number" min="8" max="56" step="2" value="28" aria-label="Number of pages"></label>
+      <label>Book name <input id="book-name" maxlength="32" value="The Keeper’s Book" aria-label="Book name for the spine"></label>
+      <button id="save-book">Save to shelf</button>
+      <label>Outside <select id="outside-color"><option value="#9b382d">Oxblood</option><option value="#31594c">Forest green</option><option value="#34466a">Midnight blue</option><option value="#65402e">Dark brown</option></select></label>
+      <label>Inside <select id="inside-color"><option value="#c85e68">Rose</option><option value="#b59b62">Parchment gold</option><option value="#587a62">Sage</option><option value="#59688a">Slate blue</option></select></label>
+      <label>Hardware <select id="metal-color"><option value="gold">Gold</option><option value="silver">Silver</option></select></label>
+      <label>Position <input id="position" type="range" min="0" max="14" step="1" value="0" aria-label="Book position"></label>
+      <label>Speed <select id="speed"><option value="280">Quick</option><option value="520">Normal</option><option value="1100">Slow</option></select></label>
+      <button id="autoplay" aria-pressed="false">Auto flip</button>
+      <label class="check"><input id="blank" type="checkbox"> Blank pages</label>
+      <label>Hand <select id="hand"><option value="keeper">Keeper</option><option value="wanderer">Wanderer</option><option value="grudge">Grudgebearer</option></select></label>
+    </div>
+    <details class="content-editor">
+      <summary id="content-editor-summary">Write in this book</summary>
+      <p id="editor-context" class="editor-context"></p>
+      <div id="page-editor" class="editor-fields">
+        <label class="edit-switch"><input id="edit-mode" type="checkbox"> Edit book</label>
+        <div id="page-edit-controls" class="editor-fields" hidden>
+          <label>Page <select id="edit-page"></select></label>
+          <label>Page type <select id="page-role"><option value="body">Text page</option><option value="section">Section header</option><option value="title">Title page</option><option value="contents">Table of contents</option></select></label>
+          <label>Contents label <input id="toc-label" maxlength="32" placeholder="Only used for section headers"></label>
+          <label>Section <input id="edit-eyebrow" maxlength="32" placeholder="Section label"></label>
+          <label>Title <input id="edit-title" maxlength="60" placeholder="Page title"></label>
+          <label>Font <select id="page-font"><option value="pixel">Pixel handwriting</option><option value="serif">Antique serif</option><option value="typewriter">Typewriter</option></select></label>
+          <label>Ink <select id="page-ink"><option value="#a98256">Light brown</option><option value="#5b3e2d" selected>Warm brown</option><option value="#39251d">Dark sepia</option></select></label>
+          <label>Paper <select id="page-paper"><option value="cream">Cream</option><option value="ivory">Pale ivory</option><option value="aged">Aged parchment</option></select></label>
+          <label>Page number <select id="page-number-position"><option value="bottom-center">Bottom center</option><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option></select></label>
+          <label class="body-field">Writing <textarea id="edit-body" maxlength="420" rows="3" placeholder="Write on this page…"></textarea></label>
+          <label class="body-field">Insert text <span class="insert-text-row"><input id="insert-text" maxlength="100" placeholder="A note, caption, or extra line"><button id="add-text" type="button">Add text</button></span></label>
+          <label class="body-field">Add image <input id="page-image-file" type="file" accept="image/*"></label>
+          <div class="body-field image-library"><span>Images on this page</span><div id="page-images"></div><button id="edit-image-pixels" type="button" disabled>Edit selected image pixels</button><button id="remove-page-image" type="button" disabled>Remove selected image</button></div>
+          <details class="pixel-editor body-field"><summary>Pixel art · draw on this page</summary>
+            <div class="pixel-tools"><label>Brush <input id="brush-size" type="range" min="1" max="16" value="3"><output id="brush-size-value">3 px</output></label><label class="ink-chip"><input type="radio" name="draw-ink" value="#a98256"><span>Light</span></label><label class="ink-chip"><input type="radio" name="draw-ink" value="#5b3e2d" checked><span>Warm</span></label><label class="ink-chip"><input type="radio" name="draw-ink" value="#39251d"><span>Dark</span></label><button id="eraser" type="button" aria-pressed="false">Eraser</button><button id="clear-art" type="button">Clear drawing</button><button id="save-art" type="button">Save drawing</button></div>
+            <canvas id="pixel-art" width="400" height="350" aria-label="Pixel art editor"></canvas>
+          </details>
+          <p class="save-hint body-field">Turn on Edit book to change text, add images, and draw. Changes save in this browser.</p>
+        </div>
+      </div>
+      <div id="cover-editor" class="editor-fields" hidden>
+        <label>Cover title <input id="cover-title" maxlength="36" placeholder="Add a title to the cover"></label>
+        <label>Lettering <select id="cover-font"><option value="serif">Antique serif</option><option value="pixel">Pixel inscription</option><option value="script">Handwritten</option></select></label>
+        <label>Placement <select id="cover-placement"><option value="top">Upper</option><option value="center">Centered</option><option value="bottom">Lower</option></select></label>
+        <div class="symbol-picker-wrap"><span>Cover symbol <button id="remove-symbol" type="button" class="symbol-remove">None</button></span><div id="cover-symbols" class="symbol-grid" role="group" aria-label="Choose a cover symbol"></div></div>
+        <p class="save-hint">Choose a gilded emblem; choose None to remove it. Saves in this browser.</p>
+      </div>
+    </details>
+    <div class="keepsakes" aria-label="Items tucked into this spread"></div>
+    <label class="margin-note">Margin note <input id="margin-note" maxlength="42" placeholder="Leave a line in the right-hand margin…"></label>
+    </details>
+    <p id="status" role="status"></p>
+  </main>
+  <dialog id="inspect" aria-labelledby="item-title">
+    <button id="close-item" aria-label="Close inspection">×</button>
+    <p class="item-kicker">TUCKED BETWEEN THE PAGES</p>
+    <h2 id="item-title"></h2>
+    <canvas id="item-art" width="360" height="280" aria-label="Inspected keepsake"></canvas>
+    <p id="item-description"></p>
+    <p id="mount-status" aria-live="polite"></p>
+    <div class="item-actions"><button id="flip-item">Turn over ↻</button><button id="tape-item">Tape in place</button></div>
+  </dialog>
+  <dialog id="shelf" aria-labelledby="shelf-title">
+    <button id="close-shelf" aria-label="Close shelf">×</button>
+    <p class="item-kicker">THE ARCHIVE</p><h2 id="shelf-title">My book shelf</h2>
+    <p id="shelf-empty" class="save-hint">Books you save will stand here by their spines.</p>
+    <div id="shelf-books" class="shelf-books"></div>
+    <div class="shelf-actions"><button id="save-copy" type="button">Save a copy</button><button id="close-shelf-action" type="button">Close</button></div>
+  </dialog>
+  <script src="ink.js?v=8"></script>
+  <script src="script.js?v=43"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# Dependencies and generated Windows packages
+node_modules/
+release/
+dist/
+out/
+coverage/
+test-results/
+playwright-report/
+
+# Private/local reference captures are not project artwork
+Ref/
+
+# Local settings, credentials, logs, and saves
+.env
+.env.*
+!.env.example
+.codex/
+.vscode/
+.idea/
+*.log
+*.pem
+*.p12
+*.pfx
+*.key
+*.book.json
+*.shelf.json
+Thumbs.db
+Desktop.ini
+.DS_Store

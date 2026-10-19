@@ -1,0 +1,1806 @@
+'use strict';
+
+// The page artwork and its writing share one offscreen viewport. Each viewport
+// is mapped onto a spine-anchored chain, including during a turn.
+const canvas = document.querySelector('#book');
+const ctx = canvas.getContext('2d');
+const W = 1000, H = 680, SEGMENTS = 30, PAGE_W = 400, PAGE_H = 350;
+const CX = 500, TOP = 168, BOTTOM = 560;
+const BOARD_SEAM=464,SPINE_END=560;
+let pageCount=28;
+const spreadCount=()=>Math.ceil(pageCount/2)+1;
+const $ = selector => document.querySelector(selector);
+const clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+const mix = (a,b,t) => a+(b-a)*t;
+const smooth = t => { t=clamp(t); return t*t*(3-2*t); };
+const sine = t => (1-Math.cos(Math.PI*clamp(t)))/2;
+const assets = {};
+const baseAssets = {};
+const contentKey='keepers-book-content-v1';
+const coverSymbolNames=['Fleur-de-lis','Compass rose','Crescent moon','Star compass','Key','Feather',
+  'Raven','Lantern','Oak leaf','Thorned rose','River wave','Mountain','All-seeing eye','Open hand','Sun','Bell',
+  'Knotwork','Hourglass','Moth','Fish','Crown','Anchor','Quill & ink','Acorn','Shell','Diamond sigil',
+  'Antlers','Laurel wreath','Autumn tree','Moon & star','North star','Clover','Dragon','Wheat sheaf','Stag','Gilded butterfly'];
+const bookContent=loadBookContent();
+pageCount=clamp(Number(bookContent.pageCount)||28,8,56);
+let bookName=bookContent.name||'The Keeper’s Book',activeBookId=localStorage.getItem('keepers-book-active')||'';
+let savedBooks=loadBookShelf(),editMode=false,selectedPageImage=-1,pixelMode='art',drawingState=null;
+const textures = new Map();
+const shadedTextures = new Map();
+const userImages=new Map();
+let editorMode='',editorPageList='',selectedEditPage=null;
+let itemHits = [], inspection = null, itemDrag = null;
+let spread = 0, motion = null, raf = 0, drag = null, autoTimer = 0;
+let loaded = false, autoDirection = 1;
+let closedEdge=null,coverMotion=null,closedFlipMotion=null;
+let spineView=false,spineMotion=null;
+let queuedTurns=[];
+let tocHitAreas=[],highlightedToc=-1,jumpTimer=0;
+const PIXEL_SCALE=.64;
+// One low-resolution framebuffer gives the art, ink, shadows and motion the
+// same pixel size. Enlarging only the source sprites left the text too smooth.
+canvas.width=Math.round(W*PIXEL_SCALE);canvas.height=Math.round(H*PIXEL_SCALE);
+ctx.setTransform(PIXEL_SCALE,0,0,PIXEL_SCALE,0,0);
+
+async function load() {
+  const loading=$('#loading');
+  if(location.protocol==='file:') {
+    document.body.classList.add('file-open');
+    loading.replaceChildren(
+      document.createTextNode('This book was opened as a local file, so the browser blocked its sprite images. '),
+      Object.assign(document.createElement('a'),{href:'http://localhost:4173/',textContent:'Open the working version at localhost'})
+    );
+    loading.classList.add('load-error');
+    return;
+  }
+  try {
+    await Promise.all(Object.entries({
+      board:'inside-board-v3.png',binding:'open-spine-v3.png',stack:'page-stack-v2.png',leather:'leather-stack-v2.png',
+      a:'page-a-v2.png', b:'page-b-v2.png', c:'page-c-v2.png',
+      front:'outside-board-v3.png',closedSpine:'closed-spine-v3.png',
+      feather:'feather-keepsake.png',spine:'spine-v1.png',symbols:'cover-symbols.png'
+    }).map(async ([key,file]) => {
+      const img = new Image(); img.src = 'assets/'+file;
+      await img.decode(); assets[key] = img;
+    }));
+    for(const key of ['a','b','c'])assets[key]=clearDarkPageFringe(assets[key]);
+    assets.leather = edgeTexture(assets.leather);
+    Object.assign(baseAssets,assets);
+    $('#outside-color').value=bookContent.palette.outside;
+    $('#inside-color').value=bookContent.palette.inside;
+    $('#metal-color').value=bookContent.palette.metal;
+    applyBookPalette(false);
+    loaded = true;
+    $('#book-name').value=bookName;
+    loading.hidden = true;
+    updateControls(); draw();
+  } catch(error) {
+    loading.replaceChildren(
+      document.createTextNode(`A book sprite could not be loaded (${error.message}). `),
+      Object.assign(document.createElement('a'),{href:'http://localhost:4173/',textContent:'Open the served version'})
+    );
+    loading.classList.add('load-error');
+    console.error(error);
+  }
+}
+
+function clearDarkPageFringe(image) {
+  // The generated paper atlas has stray opaque near-black pixels just inside
+  // either transparent edge. Clear those edge pixels before the tile is
+  // stretched into the page viewport; keep the warm torn-paper ink intact.
+  const surface=document.createElement('canvas');surface.width=image.width;surface.height=image.height;
+  const p=surface.getContext('2d',{willReadFrequently:true});p.drawImage(image,0,0);
+  const frame=p.getImageData(0,0,image.width,image.height),data=frame.data;
+  for(let y=0;y<image.height;y++)for(let x=0;x<image.width;x++) {
+    // The page renderer crops 5px from the left and 28px from the right
+    // before stretching this atlas. Clear a wider fringe than the crop so
+    // stray black pixels do not survive on the exposed page edge.
+    if(x>=40&&x<image.width-40)continue;
+    const i=(y*image.width+x)*4;
+    if(data[i+3]>24&&data[i]<48&&data[i+1]<48&&data[i+2]<52)data[i+3]=0;
+  }
+  p.putImageData(frame,0,0);return surface;
+}
+
+function edgeTexture(image) {
+  // Remove transparent padding along each strip column before stretching it
+  // between the page chain and the cover. This preserves the painted layers
+  // without exposing the cover lining through the strip's curved silhouette.
+  const original=document.createElement('canvas');
+  original.width=image.width;original.height=image.height;
+  const source=original.getContext('2d');source.drawImage(image,0,0);
+  const pixels=source.getImageData(0,0,image.width,image.height).data;
+  const result=document.createElement('canvas');result.width=image.width;result.height=96;
+  const out=result.getContext('2d');out.imageSmoothingEnabled=false;
+  out.fillStyle='#713440';out.fillRect(0,0,result.width,result.height);
+  for(let x=0;x<image.width;x++) {
+    let first=-1,last=-1;
+    for(let y=0;y<image.height;y++) if(pixels[(y*image.width+x)*4+3]>220){if(first<0)first=y;last=y;}
+    if(last>first)out.drawImage(original,x,first,1,last-first+1,x,0,1,96);
+  }
+  return result;
+}
+
+const entries = [
+  ['THE KEEPER’S BOOK','A record of\nsmall wonders','Take the road that bends\ntoward the river.\n\nBring a little salt.\nLeave a little light.'],
+  ['CONTENTS','Between\nthese pages','01  The road\n03  Field notes\n07  The reedbeds\n11  Pack & provisions\n17  The old mill\n23  Unfinished business'],
+  ['FIELD NOTES','The sunken\nroad','The old road does not end\nat the water. It simply\nforgets to rise.\n\nI tied a red thread to the\nlast tree. It was gone\nwhen I looked back.'],
+  ['IN THE MARGIN','Listen\nbefore dusk','The reeds hum before\nthe fog arrives.\n\nNo shadow crosses\nthe water twice.\n\nThe road knows your name.'],
+  ['MARSHLANDS','Blue\nlanterns','Three lights above\nthe black water.\n\nOne for the ferryman.\nOne for the lost.\n\nThe third was following me.'],
+  ['A SMALL DISCOVERY','The mill\nkey','Found beneath a stone\nwhere nothing should grow.\n\nIron. Cold to the touch.\n\nThe teeth do not match\nany lock I have seen.'],
+  ['FIELD KIT','What\nremains','Salted pear .......... 2\nBlue match ........... 1\nMill key ............. 1\nUnfamiliar coin ...... ?'],
+  ['INVENTORY NOTE','Useful,\nnot precious','The best tools are the\nones you forget you carry.\n\nKeep one dry match.\n\nNever spend the coin.'],
+  ['CARTOGRAPHY','The\nreedbeds','North is only a guess.\n\nFollow the bent willow.\nPass the broken bridge.\nStop before the bells.'],
+  ['OLD CUSTOMS','Leave\nsomething','A little bread at the gate.\nA name upon the water.\n\nDo not take back\nwhat you have given.'],
+  ['THE OLD MILL','No grain\nin the wheel','The wheel turns at night.\nThere is no river here.\n\nSomething is keeping\ncount of every turn.'],
+  ['MILL RECORD','A hand\nnot mine','Seven marks on the wall.\nSix names in the ledger.\n\nThe last page\nhas been torn away.'],
+  ['RECOLLECTION','A familiar\nvoice','It called from the reeds.\n\nI did not answer.\n\nI almost did.'],
+  ['MARGIN / 07','Remember\nthe way','Every page remembers\nthe hand that turned it.\n\nPerhaps the road does too.']
+];
+
+function loadBookContent() {
+  try {
+    const saved=JSON.parse(localStorage.getItem(contentKey)||'{}');
+    return {name:saved.name||'The Keeper’s Book',pageCount:saved.pageCount||28,pages:saved.pages||{},covers:{front:{},back:{},...(saved.covers||{})},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold',...(saved.palette||{})}};
+  } catch { return {name:'The Keeper’s Book',pageCount:28,pages:{},covers:{front:{},back:{}},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold'}}; }
+}
+
+const materialMasks=new WeakMap();
+
+function spriteSurface(width,height) {
+  const surface=document.createElement('canvas');surface.width=width;surface.height=height;return surface;
+}
+
+function mirroredSprite(source) {
+  const surface=spriteSurface(source.width,source.height),p=surface.getContext('2d');
+  p.translate(source.width,0);p.scale(-1,1);p.drawImage(source,0,0);return surface;
+}
+
+function assembledCover(board,binding) {
+  const surface=spriteSurface(1024,565),p=surface.getContext('2d');
+  p.imageSmoothingEnabled=false;
+  p.drawImage(board,0,0,BOARD_SEAM,565);
+  p.drawImage(binding,BOARD_SEAM,0,SPINE_END-BOARD_SEAM,565);
+  p.drawImage(mirroredSprite(board),SPINE_END,0,1024-SPINE_END,565);return surface;
+}
+
+function coverMaterialMask(source,kind,data) {
+  if(materialMasks.has(source))return materialMasks.get(source);
+  const mask=new Uint8Array(source.width*source.height*2);
+  for(let y=0;y<source.height;y++)for(let x=0;x<source.width;x++) {
+    const pixel=y*source.width+x,i=pixel*4,u=x/source.width,v=y/source.height;
+    const r=data[i],g=data[i+1],b=data[i+2];
+    let lining=0,metal=0;
+    if(kind==='board')lining=smooth((x-94)/8)*smooth((y-73)/8)*smooth((479-y)/8);
+    if(kind==='binding')lining=smooth((y-58)/12)*smooth((485-y)/14);
+    const corner=kind==='board'?u<.35&&(v<.25||v>.70):kind==='outside'?u>.77&&(v<.23||v>.76):false;
+    // Hardware is identified only inside the corner guards, not by applying
+    // a gold threshold to every warm highlight in the leather or lining.
+    if(corner)metal=smooth((g/Math.max(1,r)-.57)/.16)*smooth((b/Math.max(1,r)-.30)/.24);
+    if(kind==='symbols')metal=1;
+    if(kind==='spine'||kind==='binding'&&(v<.14||v>.81)) {
+      metal=Math.max(metal,smooth((g/Math.max(1,r)-.52)/.24)*smooth((.84-b/Math.max(1,g))/.22)*smooth((r-65)/55));
+    }
+    mask[pixel*2]=Math.round(lining*(1-metal)*255);mask[pixel*2+1]=Math.round(metal*255);
+  }
+  materialMasks.set(source,mask);return mask;
+}
+
+function tintCoverSprite(source,kind,palette,hardwareOnly=false) {
+  const surface=document.createElement('canvas');surface.width=source.width;surface.height=source.height;
+  const p=surface.getContext('2d',{willReadFrequently:true});p.drawImage(source,0,0);
+  const frame=p.getImageData(0,0,surface.width,surface.height),data=frame.data;
+  const mask=coverMaterialMask(source,kind,data);
+  const rgb=hex=>[1,3,5].map(index=>parseInt(hex.slice(index,index+2),16));
+  const outside=rgb(palette.outside),inside=rgb(palette.inside),metal=rgb(palette.metal==='silver'?'#c4cfd8':'#d7af60');
+  const luminance=color=>color[0]*.2126+color[1]*.7152+color[2]*.0722;
+  const outsideReference=luminance([155,56,45]),insideReference=luminance([200,94,104]);
+  for(let i=0;i<data.length;i+=4){
+    const r=data[i],g=data[i+1],b=data[i+2],alpha=data[i+3];if(alpha===0)continue;
+    const pixel=i/4,liningWeight=mask[pixel*2]/255,metalWeight=mask[pixel*2+1]/255;
+    if(hardwareOnly)data[i+3]=Math.round(alpha*metalWeight);
+    const l=luminance([r,g,b]);
+    for(let c=0;c<3;c++) {
+      const leather=palette.outside==='#9b382d'?data[i+c]:outside[c]*l/outsideReference;
+      const fabric=palette.inside==='#c85e68'?data[i+c]:inside[c]*l/insideReference;
+      const plated=metal[c]*l/180;
+      data[i+c]=clamp(mix(mix(leather,fabric,liningWeight),plated,metalWeight),0,255);
+    }
+  }
+  p.putImageData(frame,0,0);return surface;
+}
+
+function applyBookPalette(redraw=true) {
+  if(!baseAssets.board)return;
+  const palette=bookContent.palette;
+  assets.board=tintCoverSprite(baseAssets.board,'board',palette);
+  assets.binding=tintCoverSprite(baseAssets.binding,'binding',palette);
+  assets.frame=assembledCover(assets.board,assets.binding);
+  assets.insideFront=assets.board;assets.insideBack=mirroredSprite(assets.board);
+  assets.front=tintCoverSprite(baseAssets.front,'outside',palette);assets.back=mirroredSprite(assets.front);
+  assets.closedSpine=tintCoverSprite(baseAssets.closedSpine,'leather',palette);
+  assets.spine=tintCoverSprite(baseAssets.spine,'spine',palette);
+  assets.symbols=tintCoverSprite(baseAssets.symbols,'symbols',palette);
+  // Paper edges keep their warm natural color when the covers are recolored.
+  assets.leather=baseAssets.leather;
+  const guards=tintCoverSprite(baseAssets.board,'board',palette,true);
+  const empty=spriteSurface(128,565);assets.hardware=assembledCover(guards,empty);
+  textures.clear();shadedTextures.clear();
+  if(redraw)draw();
+}
+
+function loadBookShelf() {
+  try { const shelf=JSON.parse(localStorage.getItem('keepers-book-shelf-v1')||'[]');return Array.isArray(shelf)?shelf:[]; }
+  catch { return []; }
+}
+
+function persistBookContent() {
+  try { bookContent.name=bookName;bookContent.pageCount=pageCount;localStorage.setItem(contentKey,JSON.stringify(bookContent)); }
+  catch { $('#status').textContent='This browser could not save the book edits.'; }
+}
+
+function coverContent(edge) {
+  return bookContent.covers[edge]||(bookContent.covers[edge]={});
+}
+
+function viewport(number) {
+  const blank = $('#blank').checked;
+  const hand=$('#hand').value;
+  const entry = entries[number%entries.length],custom=bookContent.pages[number]||{};
+  const key = number+':'+blank+':'+hand+':'+$('#margin-note').value+':'+JSON.stringify(custom);
+  if(textures.has(key)) return textures.get(key);
+  const surface = document.createElement('canvas');
+  surface.width = PAGE_W; surface.height = PAGE_H;
+  const p = surface.getContext('2d');
+  p.imageSmoothingEnabled = false;
+  // The binding edge is straight and continuous; only the three exposed
+  // parchment edges retain the tile's torn silhouette.
+  p.fillStyle='#f6e9b5';
+  p.fillRect(number%2===1?16:0,12,PAGE_W-16,PAGE_H-24);
+  const tile=assets[['a','b','c'][number%3]];
+  // Both outer edges remain soft. Mirror the tile so its darker edge is
+  // consistently tucked into the binding on either side of the spread.
+  p.save();if(number%2===0){p.translate(PAGE_W,0);p.scale(-1,1);}
+  p.drawImage(tile,5,8,tile.width-28,tile.height-16,0,0,PAGE_W,PAGE_H);p.restore();
+  const paperTints={ivory:'rgba(255,247,218,.12)',aged:'rgba(202,147,82,.13)'};
+  if(paperTints[custom.paper]){p.save();p.globalCompositeOperation='source-atop';p.fillStyle=paperTints[custom.paper];p.fillRect(0,0,PAGE_W,PAGE_H);p.restore();}
+  if(!blank) {
+    const font=custom.font||'pixel',inkColor=custom.ink||'#5b3e2d';
+    const role=pageRole(number),title=custom.title??entry[1];
+    if(role==='contents') {
+      p.fillStyle=inkColor;ink(p,'CONTENTS',45,31,1.05,hand);
+      drawPageText(p,'Between these pages',45,63,304,font==='pixel'?'serif':font,20,inkColor,25);
+      p.fillStyle='#ae9160';p.fillRect(45,111,304,1);
+      const chapters=sectionPages(),perPage=9,start=Math.max(0,(number-1)*perPage);
+      chapters.slice(start,start+perPage).forEach((chapter,index)=>{
+        const row=index+start,folio=automaticFolio(chapter.page);
+        const label=String(folio).padStart(2,'0')+'  '+chapter.label;
+        const y=136+index*21;
+        if(highlightedToc===row){p.fillStyle='rgba(158,112,61,.18)';p.fillRect(38,y-3,326,19);}
+        p.fillStyle=inkColor;ink(p,label,45,y,1.75,hand);
+        tocHitAreas.push({page:number,row,target:chapter.page,x:38,y:y-4,w:326,h:20});
+      });
+      drawPageNumber(p,number,custom.pageNumberPlacement||'bottom-center',hand);
+    } else {
+      if(role!=='title'){
+        p.fillStyle=font==='pixel'?'#81583c':inkColor;ink(p,custom.eyebrow??entry[0],45,31,1.05,hand);
+      }
+      if(font==='pixel'){
+        p.fillStyle=inkColor;title.split('\n').forEach((line,i)=>ink(p,line,45,role==='title'?94+i*36:63+i*31,3,hand));
+      } else drawPageText(p,title,45,role==='title'?100:61,304,font,role==='title'?25:19,inkColor,role==='title'?34:26);
+      if(role!=='title'){
+        p.fillStyle = '#ae9160'; p.fillRect(45,131,304,1);
+        p.fillStyle=font==='pixel'?(custom.ink|| (hand==='grudge'?'#733c32':'#5b3e2d')):inkColor;
+        if(font==='pixel') (custom.body??entry[2]).split('\n').forEach((line,i)=>{
+          p.save();p.translate(45,151+i*20);p.rotate((hand==='wanderer'?.012:hand==='grudge'?-.009:.003)*Math.sin(i*4+number));ink(p,line,0,0,2,hand);p.restore();
+        });
+        else drawPageText(p,custom.body??entry[2],45,151,304,font,12,inkColor,18);
+        drawPageNumber(p,number,custom.pageNumberPlacement||'bottom-center',hand);
+        drawDoodle(p,number,hand);
+      }
+    }
+    if(number%2===0&&$('#margin-note').value) {
+      p.fillStyle='#8b4b34';ink(p,$('#margin-note').value.slice(0,32),45,307,1.2,hand);
+    }
+  }
+  paintUserArtwork(p,number,custom);
+  if(editMode&&!blank) {
+    p.save();p.strokeStyle='rgba(139,92,48,.72)';p.lineWidth=1;p.setLineDash([3,3]);
+    p.strokeRect(38,54,324,72);p.strokeRect(38,144,324,150);p.restore();
+  }
+  textures.set(key,surface); return surface;
+}
+
+function drawPageText(p,text,x,y,width,font,size,color,lineHeight) {
+  const family=font==='serif'?'Georgia,serif':'ui-monospace,monospace';
+  p.save();p.fillStyle=color;p.font=`${font==='serif'?'italic ':''}${size}px ${family}`;p.textBaseline='top';
+  let line='',lineY=y;
+  for(const paragraph of String(text).split('\n')) {
+    if(!paragraph){lineY+=lineHeight;continue;}
+    for(const word of paragraph.split(/\s+/)) {
+      const test=line?`${line} ${word}`:word;
+      if(line&&p.measureText(test).width>width){p.fillText(line,x,lineY,width);lineY+=lineHeight;line=word;}
+      else line=test;
+    }
+    if(line){p.fillText(line,x,lineY,width);lineY+=lineHeight;line='';}
+  }
+  p.restore();
+}
+
+function drawPageNumber(p,number,placement,hand) {
+  if(pageRole(number)==='title'||pageRole(number)==='contents')return;
+  const locations={'bottom-center':[188,326],'top-left':[25,20],'top-right':[350,20],'bottom-left':[25,326],'bottom-right':[350,326]};
+  const [x,y]=locations[placement]||locations['bottom-center'];p.save();p.fillStyle='#5b3e2d';ink(p,String(automaticFolio(number)),x,y,1.2,hand);p.restore();
+}
+
+function registerTocAreas(page,chain,side) {
+  if(pageRole(page)!=='contents')return;
+  const chapters=sectionPages(),start=Math.max(0,(page-1)*9);
+  chapters.slice(start,start+9).forEach((chapter,index)=>{
+    const y=(136+index*21)/PAGE_H,v=y+10/PAGE_H,a=38/PAGE_W,b=364/PAGE_W;
+    const ua=side<0?1-b:a,ub=side<0?1-a:b;
+    const pa=project(sampleChain(chain,ua),v),pb=project(sampleChain(chain,ub),v);
+    tocHitAreas.push({row:start+index,target:chapter.page,x:Math.min(pa.x,pb.x),y:Math.min(pa.y,pb.y)-10,w:Math.abs(pb.x-pa.x),h:20});
+  });
+}
+
+function navigateToChapter(target) {
+  stopAuto();if(raf)cancelAnimationFrame(raf);target=clamp(target,0,pageCount-1);
+  const destination=Math.ceil(target/2);
+  closedEdge=null;coverMotion=null;spineView=false;spineMotion=null;motion=null;drag=null;queuedTurns=[];
+  if(spread===destination){updateControls();draw();return;}
+  const direction=destination>spread?1:-1,steps=Math.abs(destination-spread);
+  queuedTurns=Array(Math.max(0,steps-1)).fill(direction);
+  if(begin(direction,true))settle(true,78);
+}
+
+const defaultSections={2:'The road',4:'Field notes',8:'The reedbeds',12:'Pack & provisions',18:'The old mill',24:'Unfinished business'};
+function pageRole(number){const custom=bookContent.pages[number]||{};return custom.role||(number===0?'title':number===1?'contents':defaultSections[number]?'section':'body');}
+function automaticFolio(number){let count=0;for(let i=0;i<=number;i++)if(pageRole(i)!=='title'&&pageRole(i)!=='contents')count++;return count;}
+function sectionPages(){return Array.from({length:pageCount},(_,page)=>({page,role:pageRole(page),label:(bookContent.pages[page]||{}).tocLabel||((bookContent.pages[page]||{}).title||entries[page%entries.length][1]).replace(/\n/g,' ')})).filter(x=>x.role==='section');}
+
+function getUserImage(source,number) {
+  if(!source)return null;
+  let image=userImages.get(source);
+  if(!image){image=new Image();userImages.set(source,image);image.onload=()=>{textures.delete(number);draw();};image.src=source;}
+  return image.complete&&image.naturalWidth?image:null;
+}
+
+function paintUserArtwork(p,number,custom) {
+  for(const imageData of custom.images||[]) {
+    const image=getUserImage(imageData.src,number);
+    if(image)p.drawImage(image,imageData.x,imageData.y,imageData.w,imageData.h);
+  }
+  const drawing=getUserImage(custom.art,number);
+  if(drawing)p.drawImage(drawing,0,0,PAGE_W,PAGE_H);
+}
+
+function drawDoodle(p,number,hand) {
+  p.save();p.translate(300,281);p.rotate(hand==='wanderer'?-.12:.08);
+  p.strokeStyle='#8a5837';p.fillStyle='#8a5837';p.lineWidth=1.5;
+  if(number%3===0) {
+    p.strokeRect(-18,-9,28,19);p.beginPath();p.moveTo(9,0);p.lineTo(35,0);p.lineTo(35,8);p.moveTo(29,0);p.lineTo(29,6);p.stroke();
+  } else if(number%3===1) {
+    p.beginPath();p.moveTo(-22,13);p.lineTo(-8,-15);p.lineTo(7,7);p.lineTo(20,-8);p.lineTo(34,14);p.stroke();
+    p.beginPath();p.arc(28,-16,5,0,Math.PI*2);p.stroke();
+  } else {
+    p.beginPath();p.arc(0,0,18,0,Math.PI*2);p.moveTo(-12,9);p.lineTo(10,-11);p.lineTo(5,5);p.closePath();p.stroke();
+  }
+  ink(p,number%3===0?'key':number%3===1?'north?':'coin',-23,29,.9,hand);
+  if(hand==='grudge'){p.beginPath();p.moveTo(-30,2);p.lineTo(40,-12);p.stroke();}
+  p.restore();
+}
+
+function litViewport(number,chain,side,turnShade=0) {
+  const base=viewport(number);
+  if(!shadedTextures.has(number)) {
+    const c=document.createElement('canvas');c.width=PAGE_W;c.height=PAGE_H;shadedTextures.set(number,c);
+  }
+  const surface=shadedTextures.get(number),p=surface.getContext('2d');
+  p.clearRect(0,0,PAGE_W,PAGE_H);p.drawImage(base,0,0);
+  const light=p.createLinearGradient(0,0,PAGE_W,0);
+  const slope=Math.atan2(Math.abs(chain[1].z-chain[0].z),Math.abs(chain[1].x-chain[0].x));
+  for(let i=0;i<=30;i++) {
+    const distance=side<0?1-i/30:i/30;
+    const alpha=clamp((.24+.14*clamp(slope/(Math.PI/6)))*Math.exp(-distance*13)+.04*distance*distance+turnShade,0,.52);
+    light.addColorStop(i/30,`rgba(63,22,40,${alpha})`);
+  }
+  p.globalCompositeOperation='source-atop';p.fillStyle=light;p.fillRect(0,0,PAGE_W,PAGE_H);p.globalCompositeOperation='source-over';
+  return surface;
+}
+
+const pageElevation=z=>z*1.7/(1+Math.max(0,z)/145);
+const elevationZ=e=>145*e/(246.5-e);
+const pageBlockDepth=amount=>(3+31*clamp(amount))*pageThickness();
+const layerDepth=(amount,u)=>pageBlockDepth(amount)*mix(.22,1,smooth(u/.24));
+
+// One cubic profile controls both the leaf and the block underneath it. The
+// stack sits on the board; adding pages raises its surface rather than pushing
+// a separate side strip down through the corner hardware.
+function resting(side, amount) {
+  const depth=pageBlockDepth(amount),chain=[{x:0,z:elevationZ(depth*.22),u:0}];
+  let x=0;
+  for(let i=0;i<SEGMENTS;i++) {
+    const u=(i+1)/SEGMENTS;
+    const z=elevationZ(layerDepth(amount,u)+8*smooth(u/.24));
+    const dz=z-chain.at(-1).z,segment=PAGE_W/SEGMENTS;
+    x+=Math.sqrt(Math.max(segment*segment*.25,segment*segment-dz*dz));
+    chain.push({x:side*x,z,u});
+  }
+  return chain;
+}
+
+function turnChain(direction,progress) {
+  const sourceSide=direction, targetSide=-direction;
+  const sourceAmount=sourceSide<0?spread/(spreadCount()-1):1-spread/(spreadCount()-1);
+  const targetSpread=spread+direction;
+  const targetAmount=targetSide<0?targetSpread/(spreadCount()-1):1-targetSpread/(spreadCount()-1);
+  const from=resting(sourceSide,clamp(sourceAmount));
+  const to=resting(targetSide,clamp(targetAmount));
+  const theta=turnAngle(progress);
+  // A curved chain peels away from its resting profile, traverses the spine,
+  // then blends into the opposite stack in the last 35 percent of the turn.
+  const startBlend=smooth(progress/.35),endBlend=smooth((progress-.65)/.35);
+  const chain=[];let x=0,z= mix(from[0].z,to[0].z,progress);
+  chain.push({x:0,z,u:0});
+  for(let i=0;i<SEGMENTS;i++) {
+    const u=(i+.5)/SEGMENTS;
+    // The free edge lags behind the hinge. A broad C-shaped curl remains
+    // visible at the upright position instead of collapsing into a flat line.
+    const flex=.85*Math.sin(2*Math.PI*u)*Math.sin(theta);
+    const a=theta+flex;
+    x+=direction*Math.cos(a)*PAGE_W/SEGMENTS;
+    z+=Math.sin(a)*PAGE_W/SEGMENTS;
+    const index=i+1;
+    chain.push({x:mix(mix(from[index].x,x,startBlend),to[index].x,endBlend),
+      z:mix(mix(from[index].z,z,startBlend),to[index].z,endBlend),u:index/SEGMENTS});
+  }
+  return chain;
+}
+
+function turnAngle(progress) {
+  // 15-degree peel, upright at halfway, through 160 degrees before settling.
+  // C1 Hermite spans keep angular velocity continuous across these landmarks.
+  const t=sine(progress),knots=[0,.5,.85,1],values=[15,90,160,180],slopes=[100,190,160,0];
+  let i=t<.5?0:t<.85?1:2;
+  const h=knots[i+1]-knots[i],u=(t-knots[i])/h;
+  const angle=(2*u*u*u-3*u*u+1)*values[i]+(u*u*u-2*u*u+u)*h*slopes[i]
+    +(-2*u*u*u+3*u*u)*values[i+1]+(u*u*u-u*u)*h*slopes[i+1];
+  return angle*Math.PI/180;
+}
+
+function pagePerspective(v) {
+  const depth=1/.87-1,scale=1/(1+depth*(1-v));
+  return {scale,vertical:v*scale,hinge:scale*(1+depth*.5)};
+}
+
+function project(point,v) {
+  // A homography foreshortens both the far-edge width and the texture rows.
+  // The depth scale is shared by the paper and all of its underlying edges.
+  const state=bookState();
+  const elevation=pageElevation(point.z),perspective=pagePerspective(v);
+  return {x:CX+state.shift*perspective.hinge+point.x*perspective.scale,
+    y:mix(TOP-elevation*.55,BOTTOM-elevation,perspective.vertical)-state.rise};
+}
+
+function bookState() {
+  const fraction=clamp((spread+(motion?motion.direction*sine(motion.progress):0))/(spreadCount()-1));
+  const coverShift=Math.sin((fraction-.5)*Math.PI)*7;
+  const halfSpine=(512-BOARD_SEAM)/1024*940;
+  // At the first/last spread the text block attaches at the corresponding
+  // edge of the flexible spine, rather than always at its center.
+  const shift=(2*fraction-1)*halfSpine*.975+coverShift*Math.pow(BOARD_SEAM/512,3);
+  return {fraction,rise:Math.sin(Math.PI*fraction)*17,shift,coverShift};
+}
+
+function coverPoint(x,y) {
+  const s=bookState(),nearSpine=Math.pow(1-Math.abs(x-512)/512,3);
+  const dx=(x/1024-.5)*940;
+  const point={x:CX+dx*(1-.05*(1-y/565))+s.coverShift*nearSpine,y:134+y/565*490-s.rise*nearSpine};
+  if(x>BOARD_SEAM&&x<SPINE_END) {
+    // A flexible spine between two rigid boards. The cubic bow has zero
+    // slope at either seam, so neither end tears away from the cover edge.
+    const u=(x-BOARD_SEAM)/(SPINE_END-BOARD_SEAM),v=y/565,bow=16*u*u*(1-u)*(1-u);
+    point.x+=(1-2*s.fraction)*7*bow*Math.sin(Math.PI*v);
+    point.y+=bow*(2+smooth((v-.75)/.25)*(5+pageThickness()*3));
+  }
+  return point;
+}
+
+function cover(rect={x:0,y:0,w:1024,h:565},texture=assets.frame) {
+  ctx.save();
+  const outline=[];
+  for(let i=0;i<=30;i++)outline.push(coverPoint(rect.x+rect.w*i/30,rect.y));
+  for(let i=30;i>=0;i--)outline.push(coverPoint(rect.x+rect.w*i/30,rect.y+rect.h));
+  path(outline);ctx.clip();
+  const rows=rect.h>100&&rect.x<SPINE_END&&rect.x+rect.w>BOARD_SEAM?8:1;
+  for(let row=0;row<rows;row++)for(let i=0;i<30;i++) {
+    const x0=rect.x+rect.w*i/30,x1=rect.x+rect.w*(i+1)/30;
+    const y0=rect.y+rect.h*row/rows,y1=rect.y+rect.h*(row+1)/rows;
+    quad(texture,[{x:x0,y:y0},{x:x1,y:y0},{x:x1,y:y1},{x:x0,y:y1}],
+      [coverPoint(x0,y0),coverPoint(x1,y0),coverPoint(x1,y1),coverPoint(x0,y1)]);
+  }
+  ctx.restore();
+}
+
+function path(points) {
+  ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);
+  points.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));ctx.closePath();
+}
+
+// Affine texture mapping per triangle. Both page text and paper use these UVs.
+function triangle(image,src,dst,target=ctx) {
+  const ctx=target;
+  const [s0,s1,s2]=src,[d0,d1,d2]=dst;
+  const det=s0.x*(s1.y-s2.y)+s1.x*(s2.y-s0.y)+s2.x*(s0.y-s1.y);
+  const area=(d1.x-d0.x)*(d2.y-d0.y)-(d1.y-d0.y)*(d2.x-d0.x);
+  if(Math.abs(area)<.015) return;
+  const a=(d0.x*(s1.y-s2.y)+d1.x*(s2.y-s0.y)+d2.x*(s0.y-s1.y))/det;
+  const c=(d0.x*(s2.x-s1.x)+d1.x*(s0.x-s2.x)+d2.x*(s1.x-s0.x))/det;
+  const e=(d0.x*(s1.x*s2.y-s2.x*s1.y)+d1.x*(s2.x*s0.y-s0.x*s2.y)+d2.x*(s0.x*s1.y-s1.x*s0.y))/det;
+  const b=(d0.y*(s1.y-s2.y)+d1.y*(s2.y-s0.y)+d2.y*(s0.y-s1.y))/det;
+  const d=(d0.y*(s2.x-s1.x)+d1.y*(s0.x-s2.x)+d2.y*(s1.x-s0.x))/det;
+  const f=(d0.y*(s1.x*s2.y-s2.x*s1.y)+d1.y*(s2.x*s0.y-s0.x*s2.y)+d2.y*(s0.x*s1.y-s1.x*s0.y))/det;
+  ctx.save();
+  // Expand along edge normals rather than centroid rays. Skinny triangles
+  // need a true horizontal overlap or their antialiased edges form stripes.
+  const sign=Math.sign(area);
+  const normals=dst.map((p,i)=>{const q=dst[(i+1)%3],dx=q.x-p.x,dy=q.y-p.y,l=Math.hypot(dx,dy)||1;return{x:sign*dy/l,y:-sign*dx/l};});
+  const clip=dst.map((p,i)=>{const a=normals[(i+2)%3],b=normals[i],den=Math.max(.001,1+a.x*b.x+a.y*b.y);return{x:p.x+(a.x+b.x)*.65/den,y:p.y+(a.y+b.y)*.65/den};});
+  ctx.beginPath();ctx.moveTo(clip[0].x,clip[0].y);clip.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));ctx.closePath();
+  ctx.clip();ctx.transform(a,b,c,d,e,f);ctx.drawImage(image,0,0);ctx.restore();
+}
+
+function quad(image,uv,points,target=ctx) {
+  triangle(image,[uv[0],uv[1],uv[2]],[points[0],points[1],points[2]],target);
+  triangle(image,[uv[0],uv[2],uv[3]],[points[0],points[2],points[3]],target);
+}
+
+// At a shared screen pixel, larger page-v is nearer the reading camera.
+// Rasterize the actual projected sheet, including overlapping curl strips,
+// rather than assuming a card drawn last must be in front of every strip.
+let turningSheetDepth=null;
+let turningSheetU=null;
+const insertLayer=document.createElement('canvas');
+const insertLayerContext=insertLayer.getContext('2d',{willReadFrequently:true});
+function rasterDepthTriangle(points,depths,buffer,us=null,uBuffer=null) {
+  const width=canvas.width,height=canvas.height;
+  const a=points[0],b=points[1],c=points[2];
+  const det=(b.y-c.y)*(a.x-c.x)+(c.x-b.x)*(a.y-c.y);
+  if(Math.abs(det)<.0001)return;
+  const minX=Math.max(0,Math.floor(Math.min(a.x,b.x,c.x))),maxX=Math.min(width-1,Math.ceil(Math.max(a.x,b.x,c.x)));
+  const minY=Math.max(0,Math.floor(Math.min(a.y,b.y,c.y))),maxY=Math.min(height-1,Math.ceil(Math.max(a.y,b.y,c.y)));
+  for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++) {
+    const px=x+.5,py=y+.5;
+    const u=((b.y-c.y)*(px-c.x)+(c.x-b.x)*(py-c.y))/det;
+    const v=((c.y-a.y)*(px-c.x)+(a.x-c.x)*(py-c.y))/det,w=1-u-v;
+    if(u<-.002||v<-.002||w<-.002)continue;
+    const depth=u*depths[0]+v*depths[1]+w*depths[2],index=y*width+x;
+    if(depth>buffer[index]){buffer[index]=depth;if(uBuffer)uBuffer[index]=u*us[0]+v*us[1]+w*us[2];}
+  }
+}
+function rasterDepthQuad(points,depths,buffer,us=null,uBuffer=null) {
+  const transform=ctx.getTransform();
+  const p=points.map(p=>({x:transform.a*p.x+transform.c*p.y+transform.e,y:transform.b*p.x+transform.d*p.y+transform.f}));
+  rasterDepthTriangle([p[0],p[1],p[2]],[depths[0],depths[1],depths[2]],buffer,us&&[us[0],us[1],us[2]],uBuffer);
+  rasterDepthTriangle([p[0],p[2],p[3]],[depths[0],depths[2],depths[3]],buffer,us&&[us[0],us[2],us[3]],uBuffer);
+}
+function buildTurningSheetDepth(chain) {
+  const buffer=new Float32Array(canvas.width*canvas.height);buffer.fill(-Infinity);
+  turningSheetU=new Float32Array(buffer.length);turningSheetU.fill(NaN);
+  for(let i=0;i<SEGMENTS;i++)for(let row=0;row<6;row++) {
+    const v0=row/6,v1=(row+1)/6;
+    rasterDepthQuad([project(chain[i],v0),project(chain[i+1],v0),project(chain[i+1],v1),project(chain[i],v1)],[v0,v0,v1,v1],buffer,[chain[i].u,chain[i+1].u,chain[i+1].u,chain[i].u],turningSheetU);
+  }
+  return buffer;
+}
+
+function mesh(chain,texture,side,extraShade=0,backTexture=null) {
+  ctx.save();
+  const silhouette=[...chain.map(p=>project(p,0)),...chain.slice().reverse().map(p=>project(p,1))];
+  if(backTexture) {
+    // A curled sheet projects overlapping front/back strips. An outline clip
+    // cancels those opposite windings and cuts holes through the paper.
+    // Build the union from consistently wound strip quads instead.
+    ctx.beginPath();
+    for(let i=0;i<SEGMENTS;i++) {
+      const points=[project(chain[i],0),project(chain[i+1],0),project(chain[i+1],1),project(chain[i],1)];
+      let area=0;points.forEach((p,j)=>{const q=points[(j+1)%4];area+=p.x*q.y-q.x*p.y;});
+      if(area<0)points.reverse();
+      ctx.moveTo(points[0].x,points[0].y);points.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));ctx.closePath();
+    }
+    ctx.clip();
+  } else {path(silhouette);ctx.clip();}
+  // The silhouette includes the slanted hinge. A vertical half-book clip
+  // would cut the binding edge off a correctly foreshortened resting leaf.
+  const tw=texture.width,th=texture.height;
+  for(let i=0;i<SEGMENTS;i++) {
+    const a=chain[i],b=chain[i+1];
+    const points=[project(a,0),project(b,0),project(b,1),project(a,1)];
+    const isBack=backTexture&&(b.x-a.x)*side<0;
+    const faceSide=isBack?-side:side,face=isBack?backTexture:texture;
+    const u0=(faceSide<0?1-a.u:a.u)*tw,u1=(faceSide<0?1-b.u:b.u)*tw;
+    const rows=backTexture||texture.width===PAGE_W&&texture.height===PAGE_H?6:1;
+    for(let row=0;row<rows;row++){
+      const v0=row/rows,v1=(row+1)/rows;
+      quad(face,[{x:u0,y:v0*th},{x:u1,y:v0*th},{x:u1,y:v1*th},{x:u0,y:v1*th}],
+        [project(a,v0),project(b,v0),project(b,v1),project(a,v1)]);
+    }
+  }
+  if(extraShade>0) {
+    const outline=[...chain.map(p=>project(p,0)),...chain.slice().reverse().map(p=>project(p,1))];
+    ctx.fillStyle=`rgba(63,22,40,${extraShade})`;path(outline);ctx.fill();
+  }
+  ctx.restore();
+}
+
+function stacks(chain,side,amount) {
+  const load=clamp(amount),depth=pageBlockDepth(load),state=bookState();
+  const foreEdge=side*(depth*.30+Math.max(0,side*(state.coverShift-state.shift)));
+  const lower=(p,v)=>{
+    const point=project(p,v),perspective=pagePerspective(v);
+    return {x:point.x+foreEdge*p.u*perspective.scale,y:point.y+layerDepth(load,p.u)*mix(.55,1,perspective.vertical)};
+  };
+  // Surface leaves are contained inside the common block, not painted across
+  // its front face. All layers use the same projected depth and outer corner.
+  const leafCount=Math.max(1,Math.round(1+load*4));
+  for(let k=leafCount;k>=1;k--) {
+    const fraction=k/(leafCount+1);
+    const under=chain.map(p=>({...p,x:p.x+foreEdge*fraction*p.u,
+      z:elevationZ(pageElevation(p.z)-layerDepth(load,p.u)*fraction)}));
+    mesh(under,assets[['a','b','c'][k%3]],side,.05);
+  }
+  // The vertical fore-edge and bottom ribbon meet at the exact same point.
+  // Keep the strip's painted curl out of its UV range; the spline supplies
+  // the curl, while the flat painted rows supply the individual page layers.
+  const edge=chain.at(-1),et=project(edge,0),eb=project(edge,1);
+  for(let row=0;row<6;row++){
+    const v0=row/6,v1=(row+1)/6,u0=mix(8,assets.stack.width-8,v0),u1=mix(8,assets.stack.width-8,v1);
+    quad(assets.stack,[{x:u0,y:8},{x:u1,y:8},{x:u1,y:assets.stack.height-8},{x:u0,y:assets.stack.height-8}],
+      [project(edge,v0),project(edge,v1),lower(edge,v1),lower(edge,v0)]);
+  }
+  for(let i=0;i<SEGMENTS;i++) {
+    const a=chain[i],b=chain[i+1],pa=project(a,1),pb=project(b,1);
+    const lowerA=lower(a,1),lowerB=lower(b,1);
+    const u0=(.26+a.u*.55)*assets.leather.width,u1=(.26+b.u*.55)*assets.leather.width;
+    ctx.fillStyle='#622e38';path([pa,pb,lowerB,lowerA]);ctx.fill();
+    quad(assets.leather,[{x:u0,y:8},{x:u1,y:8},{x:u1,y:assets.leather.height-8},{x:u0,y:assets.leather.height-8}],
+      [pa,pb,lowerB,lowerA]);
+  }
+}
+
+function castShadow(turning,receiving) {
+  const targetSide=-motion.direction;
+  const receiverSide=Math.sign(receiving.at(-1).x);
+  const fade=receiverSide===targetSide?smooth((motion.progress-.5)/.13):1-smooth(motion.progress/.5);
+  if(fade===0)return;
+  const alphas=[];
+  for(let i=0;i<SEGMENTS;i++) {
+    const a=receiving[i],b=receiving[i+1];
+    // Trace the turning chain in screen space to locate the shadow's footprint.
+    let closest=null;
+    for(let j=0;j<SEGMENTS;j++) {
+      const a0=turning[j],b0=turning[j+1];
+      if(a.x<Math.min(a0.x,b0.x)||a.x>Math.max(a0.x,b0.x))continue;
+      const u=(a.x-a0.x)/(b0.x-a0.x||1e-6);
+      const candidate={x:a.x,z:mix(a0.z,b0.z,u)};
+      if(!closest||candidate.z>closest.z)closest=candidate;
+    }
+    if(!closest){alphas.push(0);continue;}
+    const gap=Math.abs(closest.z-a.z);
+    alphas.push(.38*Math.exp(-gap/95)*fade);
+  }
+  // One gradient over the chain avoids a visible seam at every shadow segment.
+  const gradient=ctx.createLinearGradient(project(receiving[0],0).x,0,project(receiving.at(-1),0).x,0);
+  alphas.forEach((a,i)=>gradient.addColorStop(i/SEGMENTS,`rgba(62,21,35,${a})`));
+  gradient.addColorStop(1,`rgba(62,21,35,${alphas.at(-1)||0})`);
+  path([...receiving.map(p=>project(p,0)),...receiving.slice().reverse().map(p=>project(p,1))]);ctx.fillStyle=gradient;ctx.fill();
+}
+
+function draw() {
+  if(!loaded)return;
+  tocHitAreas=[];
+  turningSheetDepth=null;
+  ctx.clearRect(0,0,W,H);ctx.imageSmoothingEnabled=false;
+  if(spineView&&!spineMotion){drawSpineView();return;}
+  ctx.save();ctx.fillStyle='rgba(0,0,0,.45)';
+  ctx.shadowColor='rgba(0,0,0,.7)';ctx.shadowBlur=12;
+  ctx.beginPath();ctx.ellipse(500,587,closedEdge?220:430,27,0,0,Math.PI*2);ctx.fill();ctx.restore();
+  const spineAmount=spineMotion?mix(spineMotion.from,spineMotion.to,sine(spineMotion.progress)):0;
+  ctx.save();
+  if(spineMotion){const squash=1-.96*spineAmount;ctx.translate(CX,0);ctx.scale(squash,1);ctx.translate(-CX,0);}
+  if(coverMotion||closedEdge){drawCoverScene();ctx.restore();if(spineMotion)drawSpineOverlay(spineAmount);return;}
+  // Keep the cover a separate sprite. No finished open-book image is used.
+  cover();itemHits=[];
+  const p=motion?motion.progress:0;
+  const fractional=spread+(motion?motion.direction*sine(p):0);
+  const left=resting(-1,clamp(fractional/(spreadCount()-1)));
+  const right=resting(1,clamp(1-fractional/(spreadCount()-1)));
+  let leftNumber=spread*2-1,rightNumber=spread*2;
+  if(motion) {
+    if(motion.direction===1) rightNumber+=2;
+    else leftNumber-=2;
+  }
+  // Draw a board only where its cover lining is exposed. The opposite side is
+  // already occupied by live paper; showing the full board beneath it leaks
+  // its pink lining through the torn lower edge of the page.
+  if(leftNumber<0)drawInside(-1);
+  if(rightNumber>=pageCount)drawInside(1);
+  if(leftNumber<0)restingItems(resting(-1,1),-1,-1,'over');
+  if(rightNumber>=pageCount)restingItems(resting(1,1),pageCount,1,'over');
+  if(leftNumber>=0)stacks(left,-1,clamp(fractional/(spreadCount()-1)));
+  if(rightNumber<pageCount)stacks(right,1,clamp(1-fractional/(spreadCount()-1)));
+  if(leftNumber>=0){restingItems(left,leftNumber,-1,'under');mesh(left,litViewport(leftNumber,left,-1),-1);registerTocAreas(leftNumber,left,-1);restingItems(left,leftNumber,-1,'over');}
+  if(rightNumber<pageCount){restingItems(right,rightNumber,1,'under');mesh(right,litViewport(rightNumber,right,1),1);registerTocAreas(rightNumber,right,1);restingItems(right,rightNumber,1,'over');}
+  if(motion) {
+    const chain=turnChain(motion.direction,p);
+    castShadow(chain,left);castShadow(chain,right);
+    const frontNumber=motion.direction===1?spread*2:spread*2-1;
+    const backNumber=frontNumber+motion.direction;
+    if(itemsOnPage(frontNumber).length||itemsOnPage(backNumber).length)turningSheetDepth=buildTurningSheetDepth(chain);
+    const shade=.065*Math.sin(Math.PI*p);
+    turningItems(chain,'under');
+    mesh(chain,litViewport(frontNumber,chain,motion.direction,shade),motion.direction,0,
+      litViewport(backNumber,chain,-motion.direction,shade));
+    // The parchment sprite owns its torn alpha edge. An extra straight
+    // outline here fills transparent pixels with a conspicuous pale seam.
+    turningItems(chain,'over');
+  }
+  // Cover's lower rim encloses the page stack, but must not cover the inside
+  // board's own corner guard. Those guards are already part of the inside-
+  // cover sprite and meet its bottom rail cleanly when left untouched.
+  if(leftNumber<0)cover({x:512,y:530,w:512,h:35});
+  else if(rightNumber>=pageCount)cover({x:0,y:530,w:512,h:35});
+  else cover({x:0,y:530,w:1024,h:35});
+  // The lower cover rail overlaps the inside-board corner artwork. Restore
+  // the clipped corner guards after the page block and rail have been drawn.
+  if(leftNumber<0)redrawInsideCorner(-1);
+  if(rightNumber>=pageCount)redrawInsideCorner(1);
+  // The binding cap belongs behind the page fans. It was already drawn with
+  // the spine; repainting any rectangle here cuts square ends into the fans.
+  paintFloatingInserts();
+  ctx.restore();
+  if(spineMotion)drawSpineOverlay(spineAmount);
+}
+
+function paintFloatingInserts() {
+  for(const item of allInserts()) {
+    const state=itemState(item);
+    if(!state.outside||itemDrag?.item===item)continue;
+    paintItem(item,state.back,{x:state.outsideX,y:state.outsideY},1,state.rotation,true,null,null,null);
+  }
+  // Dragged cards deliberately render after the paper, clasps, and cover lip:
+  // the hand is holding them above the book, even while crossing its spine.
+  if(itemDrag) {
+    const state=itemState(itemDrag.item);
+    if(state.outside)paintItem(itemDrag.item,state.back,{x:itemDrag.x,y:itemDrag.y},1,state.rotation,false,itemDrag.pageNumber,null,null);
+    else {
+      const side=state.pageNumber%2===0?1:-1;
+      const amount=side<0?spread/(spreadCount()-1):1-spread/(spreadCount()-1);
+      paintPageItem(itemDrag.item,resting(side,amount),side,state.pageNumber);
+    }
+  }
+}
+
+function drawSpineOverlay(amount=1) {
+  ctx.save();ctx.globalAlpha=amount;
+  const shade=ctx.createLinearGradient(0,0,0,H);shade.addColorStop(0,'#080b0c');shade.addColorStop(.52,'#111719');shade.addColorStop(1,'#080b0c');
+  ctx.fillStyle=shade;ctx.fillRect(0,0,W,H);
+  drawSpineView();ctx.restore();
+}
+
+const opaqueBoundsCache=new WeakMap();
+let spineTitleCache=null;
+
+function opaqueBounds(source) {
+  if(opaqueBoundsCache.has(source))return opaqueBoundsCache.get(source);
+  const surface=spriteSurface(source.width,source.height),p=surface.getContext('2d');p.drawImage(source,0,0);
+  const pixels=p.getImageData(0,0,source.width,source.height).data;
+  let left=source.width,top=source.height,right=0,bottom=0;
+  for(let y=0;y<source.height;y++)for(let x=0;x<source.width;x++)if(pixels[(y*source.width+x)*4+3]>180){
+    left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);
+  }
+  const bounds={left,top,right:right+1,bottom:bottom+1};opaqueBoundsCache.set(source,bounds);return bounds;
+}
+
+function titledSpine() {
+  const title=bookName.trim()||'Untitled book';
+  if(spineTitleCache?.source===assets.spine&&spineTitleCache.title===title)return spineTitleCache.texture;
+  const texture=spriteSurface(260,assets.spine.height),p=texture.getContext('2d');
+  p.imageSmoothingEnabled=false;p.drawImage(assets.spine,380,0,260,assets.spine.height,0,0,260,texture.height);
+  const original=spriteSurface(texture.width,texture.height);original.getContext('2d').drawImage(texture,0,0);
+  // Retain the two end bands. Rebuild the entire middle as one continuous
+  // leather panel, removing the two internal raised bands and old dividers.
+  p.clearRect(0,300,260,890);
+  p.save();p.beginPath();p.rect(0,300,260,890);p.clip();
+  for(let y=300;y<1190;y+=56)p.drawImage(original,0,130,260,56,0,y,260,56);
+  p.beginPath();p.rect(47,300,166,890);p.clip();
+  for(let y=300;y<1190;y+=96)for(let x=47;x<213;x+=82)p.drawImage(original,94,95,82,96,x,y,82,96);
+  p.restore();
+  p.strokeStyle=metalInk();p.globalAlpha=.50;p.lineWidth=3;
+  p.beginPath();p.moveTo(43,317);p.lineTo(43,1173);p.moveTo(217,317);p.lineTo(217,1173);p.stroke();p.globalAlpha=1;
+  // Extract the existing emblem with its dark pixel outline. The surrounding
+  // leather remains transparent, so it can be moved to both end panels.
+  const icon=spriteSurface(100,134),ip=icon.getContext('2d');ip.drawImage(original,82,336,100,134,0,0,100,134);
+  const frame=ip.getImageData(0,0,100,134),mask=materialMasks.get(baseAssets.spine);
+  for(let y=0;y<134;y++)for(let x=0;x<100;x++){
+    let marked=false;
+    for(let dy=-3;dy<=3&&!marked;dy++)for(let dx=-3;dx<=3;dx++){
+      const xx=x+dx,yy=y+dy;if(xx<0||xx>=100||yy<0||yy>=134)continue;
+      if(mask[((336+yy)*baseAssets.spine.width+380+82+xx)*2+1]>100){marked=true;break;}
+    }
+    if(!marked)frame.data[(y*100+x)*4+3]=0;
+  }
+  ip.putImageData(frame,0,0);p.drawImage(icon,80,84);
+  p.save();p.translate(130,1339);p.rotate(Math.PI);p.drawImage(icon,-50,-67);p.restore();
+  p.save();p.translate(130,745);p.rotate(-Math.PI/2);p.textAlign='center';p.textBaseline='middle';
+  let size=110;
+  do {p.font=`bold ${size}px Georgia`;if(p.measureText(title).width<=800)break;size--;}while(size>18);
+  p.strokeStyle=coverInk(.24);p.lineWidth=4;p.lineJoin='round';p.fillStyle=metalInk();
+  p.strokeText(title,0,0,800);p.fillText(title,0,0,800);
+  p.restore();spineTitleCache={source:assets.spine,title,texture};return texture;
+}
+
+function drawSpineView() {
+  // The spine, board, and bevel share one camera and the same hinge vertices.
+  const height=430,width=310,depth=30+pageCount*1.2,yaw=.43,pitch=.055,focal=1400;
+  const spine=titledSpine(),spineUV=opaqueBounds(spine),boardUV=opaqueBounds(assets.front);
+  const camera=(x,y,z)=>{
+    const horizontal=x*Math.sin(yaw)+z*Math.cos(yaw),distance=-x*Math.cos(yaw)+z*Math.sin(yaw);
+    const vertical=(y-height/2)*Math.cos(pitch)+distance*Math.sin(pitch);
+    const forward=distance*Math.cos(pitch)-(y-height/2)*Math.sin(pitch),scale=focal/(focal-forward);
+    return {x:horizontal*scale,y:vertical*scale};
+  };
+  const spinePoint=(u,v)=>camera(-depth*.22*Math.sin(Math.PI*u),v*height,-depth*.5*Math.cos(Math.PI*u));
+  const board=[camera(0,0,depth/2),camera(width,0,depth/2),camera(width,height,depth/2),camera(0,height,depth/2)];
+  const silhouette=[...board];for(let i=0;i<=18;i++){silhouette.push(spinePoint(i/18,0),spinePoint(i/18,1));}
+  const minX=Math.min(...silhouette.map(p=>p.x)),maxX=Math.max(...silhouette.map(p=>p.x));
+  const minY=Math.min(...silhouette.map(p=>p.y)),maxY=Math.max(...silhouette.map(p=>p.y));
+  const scale=430/(maxY-minY),offsetX=CX-(minX+maxX)*scale/2,offsetY=116-minY*scale;
+  const screen=p=>({x:p.x*scale+offsetX,y:p.y*scale+offsetY}),face=board.map(screen);
+  ctx.save();ctx.imageSmoothingEnabled=false;
+  ctx.save();ctx.fillStyle='rgba(0,0,0,.42)';ctx.shadowColor='rgba(0,0,0,.5)';ctx.shadowBlur=13;
+  ctx.beginPath();ctx.ellipse(CX,558,(maxX-minX)*scale*.61,12,0,0,Math.PI*2);ctx.fill();ctx.restore();
+  // A board has a narrow leather bevel, not a second cover-sized backing slab.
+  const bevel=[camera(0,0,depth/2-5),camera(width,0,depth/2-5),board[1],board[0]].map(screen);
+  ctx.fillStyle=coverInk(.55);path(bevel);ctx.fill();
+  quad(assets.front,[{x:boardUV.left,y:boardUV.top},{x:boardUV.right,y:boardUV.top},
+    {x:boardUV.right,y:boardUV.bottom},{x:boardUV.left,y:boardUV.bottom}],face);
+  paintCoverCustomization('front',face);
+  for(let row=0;row<8;row++)for(let column=0;column<18;column++) {
+    const u0=column/18,u1=(column+1)/18,v0=row/8,v1=(row+1)/8;
+    const points=[spinePoint(u0,v0),spinePoint(u1,v0),spinePoint(u1,v1),spinePoint(u0,v1)].map(screen);
+    const x0=mix(spineUV.left,spineUV.right,u0),x1=mix(spineUV.left,spineUV.right,u1);
+    const y0=mix(spineUV.top,spineUV.bottom,v0),y1=mix(spineUV.top,spineUV.bottom,v1);
+    quad(spine,[{x:x0,y:y0},{x:x1,y:y0},{x:x1,y:y1},{x:x0,y:y1}],points);
+    const shade=.14*(1-Math.sin(Math.PI*(u0+u1)/2));
+    ctx.fillStyle=`rgba(0,0,0,${shade})`;path(points);ctx.fill();
+  }
+  ctx.fillStyle='#c8ad7c';ctx.font='12px monospace';ctx.textAlign='center';ctx.fillText(`SPINE VIEW · ${pageCount} PAGES`,CX,82);
+  ctx.restore();
+}
+
+function drawInside(side) {
+  // The exposed lining is the same board already used beneath the paper.
+  // Reuse that plane instead of swapping in a second framed cover image.
+  cover({x:side<0?0:512,y:0,w:512,h:565});
+}
+
+function pageThickness() {
+  // Page-count thickness is bounded: the minimum book still has a visible
+  // leaf block, while the maximum grows substantially without doubling the
+  // cover geometry or causing the lower corners to protrude.
+  return .34+((pageCount-8)/48)*1.18;
+}
+
+function redrawInsideCorner(side) {
+  cover({x:side<0?0:912,y:400,w:112,h:165},assets.hardware);
+}
+
+function drawCoverScene() {
+  const edge=coverMotion?coverMotion.edge:closedFlipMotion?(closedFlipMotion.progress<.5?closedFlipMotion.from:closedFlipMotion.to):closedEdge;
+  const amount=coverMotion?coverMotion.amount:1;
+  const depthAlpha=smooth((amount-.72)/.28),closedLift=20*depthAlpha;
+  const side=edge==='front'?-1:1,receiving=-side;
+  ctx.save();
+  if(closedFlipMotion){const squash=Math.max(.025,Math.abs(Math.cos(Math.PI*closedFlipMotion.progress)));ctx.translate(CX,0);ctx.scale(squash,1);ctx.translate(-CX,0);}
+  const seam=side<0?BOARD_SEAM:SPINE_END,targetSeam=side<0?SPINE_END:BOARD_SEAM;
+  const targetOuter=side<0?1024:0;
+  const closedCenter=(coverPoint(targetSeam,565).x+coverPoint(targetOuter,565).x)/2;
+  itemHits=[];ctx.save();ctx.translate((CX-closedCenter)*amount,-closedLift);
+  ctx.save();ctx.globalAlpha=1-smooth((amount-.95)/.05);
+  cover({x:receiving<0?0:512,y:0,w:512,h:565});drawInside(receiving);
+  cover({x:BOARD_SEAM,y:0,w:SPINE_END-BOARD_SEAM,h:565});
+  const coverPage=edge==='front'?-1:pageCount;
+  restingItems(resting(receiving,1),coverPage,receiving,'over');
+  const chain=resting(receiving,1),number=edge==='front'?0:pageCount-1;
+  stacks(chain,receiving,1);mesh(chain,litViewport(number,chain,receiving),receiving);
+  if(amount<.95)restingItems(chain,number,receiving,'over');
+  ctx.restore();
+  const angle=Math.PI*amount,lift=115*Math.sin(angle),hinge=mix(seam,targetSeam,amount);
+  const hingeTop=coverPoint(hinge,0),hingeBottom=coverPoint(hinge,565);
+  const openOuter=side<0?0:1024;
+  const topWidth=Math.abs(coverPoint(openOuter,0).x-coverPoint(seam,0).x);
+  const bottomWidth=Math.abs(coverPoint(openOuter,565).x-coverPoint(seam,565).x);
+  const points=[hingeTop,{x:hingeTop.x+side*topWidth*Math.cos(angle),y:134-lift},
+    {x:hingeBottom.x+side*bottomWidth*Math.cos(angle),y:624-lift},hingeBottom];
+    const thickness=pageThickness();
+  const stackTop=points[2].y-28*depthAlpha*thickness,stackBottom=points[2].y+4*depthAlpha*thickness;
+  const stackLeft=Math.min(points[2].x,points[3].x)+14*depthAlpha;
+  const stackRight=Math.max(points[2].x,points[3].x)-14*depthAlpha;
+  if(depthAlpha>0) {
+    ctx.save();ctx.globalAlpha=depthAlpha;
+    ctx.save();ctx.beginPath();ctx.moveTo(stackLeft,stackTop);ctx.lineTo(stackRight,stackTop);
+    ctx.lineTo(stackRight,stackBottom);ctx.lineTo(stackLeft,stackBottom);ctx.closePath();ctx.clip();
+    ctx.fillStyle='#d9a45d';ctx.fill();
+    quad(assets.stack,[{x:0,y:0},{x:assets.stack.width,y:0},{x:assets.stack.width,y:assets.stack.height},{x:0,y:assets.stack.height}],
+      [{x:stackLeft,y:stackTop},{x:stackRight,y:stackTop},
+       {x:stackRight,y:stackBottom},{x:stackLeft,y:stackBottom}]);
+    ctx.globalCompositeOperation='source-atop';ctx.fillStyle='rgba(88,39,47,.2)';
+    ctx.fillRect(stackLeft,stackTop,stackRight-stackLeft,stackBottom-stackTop);
+    ctx.globalCompositeOperation='source-over';
+    const lineCount=Math.max(2,Math.round(pageCount/4));
+    for(let i=1;i<lineCount;i++) {
+      const y=mix(stackTop,stackBottom,i/lineCount);
+      ctx.strokeStyle=i%2?'rgba(255,224,151,.72)':'rgba(102,54,39,.56)';ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(stackLeft+3,y);ctx.lineTo(stackRight-3,y);ctx.stroke();
+    }
+    const bandY=stackBottom-6*depthAlpha*thickness;
+    quad(assets.leather,[{x:0,y:10},{x:assets.leather.width,y:10},{x:assets.leather.width,y:82},{x:0,y:82}],
+      [{x:stackLeft,y:bandY},{x:stackRight,y:bandY},{x:stackRight,y:bandY+7*depthAlpha*thickness},{x:stackLeft,y:bandY+7*depthAlpha*thickness}]);
+    ctx.restore();
+    ctx.restore();
+  }
+  const outside=amount>=.5,faceSide=outside?-side:side;
+  const image=outside?(edge==='front'?assets.front:assets.back):(edge==='front'?assets.insideFront:assets.insideBack);
+  const minU=0,maxU=image.width;
+  const u0=faceSide<0?maxU:minU,u1=faceSide<0?minU:maxU;
+  if(outside) {
+    const width=(10+pageCount*.15)*smooth((amount-.5)/.5),spine=assets.closedSpine;
+    const top={x:points[0].x+side*width,y:points[0].y},bottom={x:points[3].x+side*width,y:points[3].y};
+    quad(spine,[{x:side<0?0:spine.width,y:0},{x:side<0?spine.width:0,y:0},
+      {x:side<0?spine.width:0,y:spine.height},{x:side<0?0:spine.width,y:spine.height}],
+      [top,points[0],points[3],bottom]);
+  }
+  quad(image,[{x:u0,y:0},{x:u1,y:0},{x:u1,y:image.height},{x:u0,y:image.height}],points);
+  if(outside)paintCoverCustomization(edge,points);
+  ctx.restore();
+  ctx.restore();
+}
+
+function bilerp(points,u,v) {
+  const top={x:mix(points[0].x,points[1].x,u),y:mix(points[0].y,points[1].y,u)};
+  const bottom={x:mix(points[3].x,points[2].x,u),y:mix(points[3].y,points[2].y,u)};
+  return {x:mix(top.x,bottom.x,v),y:mix(top.y,bottom.y,v)};
+}
+
+function metalInk(){return bookContent.palette.metal==='silver'?'#dce6ee':'#f0cd82';}
+function coverInk(shade=1) {
+  const color=bookContent.palette.outside;
+  return `rgb(${[1,3,5].map(index=>Math.round(clamp(parseInt(color.slice(index,index+2),16)*shade,0,255))).join(',')})`;
+}
+
+function paintCoverCustomization(edge,points) {
+  const cover=coverContent(edge),placement=cover.placement||'center';
+  const title=String(cover.title||'').trim();
+  const symbol=Number.isInteger(cover.symbol)?cover.symbol:-1;
+  const titleV=placement==='top'?.25:placement==='bottom'?.76:.46;
+  if(symbol>=0&&symbol<36) {
+    const cell=assets.symbols.width/6,col=symbol%6,row=Math.floor(symbol/6),pad=cell*.045;
+    const u0=.34,u1=.66,v0=title? (placement==='center'?.67:.47):.34,v1=title? v0+.25:.66;
+    quad(assets.symbols,[{x:col*cell+pad,y:row*cell+pad},{x:(col+1)*cell-pad,y:row*cell+pad},
+      {x:(col+1)*cell-pad,y:(row+1)*cell-pad},{x:col*cell+pad,y:(row+1)*cell-pad}],
+      [bilerp(points,u0,v0),bilerp(points,u1,v0),bilerp(points,u1,v1),bilerp(points,u0,v1)]);
+  }
+  if(!title)return;
+  const lettering=document.createElement('canvas');lettering.width=400;lettering.height=84;
+  const pen=lettering.getContext('2d');
+  const families={serif:'Georgia, serif',pixel:'monospace',script:'cursive'};
+  let size=cover.font==='pixel'?31:cover.font==='script'?36:34;
+  pen.textAlign='center';pen.textBaseline='middle';
+  do {pen.font=`${size}px ${families[cover.font]||families.serif}`;if(pen.measureText(title).width<=370)break;size--;} while(size>14);
+  pen.lineJoin='round';pen.strokeStyle='rgba(46,21,23,.95)';pen.lineWidth=4;pen.strokeText(title,200,43,370);
+  pen.fillStyle=metalInk();pen.shadowColor=bookContent.palette.metal==='silver'?'#414a55':'#6d351e';pen.shadowBlur=4;pen.fillText(title,200,43,370);
+  const v0=titleV-.085,v1=titleV+.085,u0=.13,u1=.87;
+  quad(lettering,[{x:0,y:0},{x:400,y:0},{x:400,y:84},{x:0,y:84}],
+    [bilerp(points,u0,v0),bilerp(points,u1,v0),bilerp(points,u1,v1),bilerp(points,u0,v1)]);
+}
+
+function animateCover(edge,closing) {
+  if(motion||coverMotion||closedFlipMotion||spineMotion||spineView||inspection||!loaded)return false;
+  const resumeAuto=!closing&&$('#autoplay').getAttribute('aria-pressed')==='true';
+  stopAuto();drag=null;closedEdge=null;
+  if(resumeAuto)$('#autoplay').setAttribute('aria-pressed','true');
+  coverMotion={edge,amount:closing?0:1};updateControls();
+  const start=performance.now(),duration=Number($('#speed').value)*1.1;
+  const frame=now=>{
+    const t=clamp((now-start)/duration),p=sine(t);
+    coverMotion.amount=closing?p:1-p;draw();
+    if(t<1)raf=requestAnimationFrame(frame);
+    else{
+      closedEdge=closing?edge:null;coverMotion=null;raf=0;updateControls();draw();
+      if(!closing&&$('#autoplay').getAttribute('aria-pressed')==='true')autoTimer=setTimeout(()=>begin(autoDirection),550);
+    }
+  };raf=requestAnimationFrame(frame);return true;
+}
+
+function flipClosedBook() {
+  if(!closedEdge||coverMotion||closedFlipMotion||spineView||spineMotion)return false;
+  const from=closedEdge,to=from==='front'?'back':'front',start=performance.now(),duration=460;
+  closedFlipMotion={from,to,progress:0};updateControls();
+  const frame=now=>{
+    if(!closedFlipMotion)return;
+    closedFlipMotion.progress=clamp((now-start)/duration);draw();
+    if(closedFlipMotion.progress<1)raf=requestAnimationFrame(frame);
+    else{closedEdge=to;spread=to==='front'?0:spreadCount()-1;closedFlipMotion=null;raf=0;updateControls();draw();}
+  };
+  raf=requestAnimationFrame(frame);return true;
+}
+
+function animateSpineView() {
+  if(motion||coverMotion||closedFlipMotion||spineMotion||inspection||!loaded)return false;
+  stopAuto();
+  const from=spineView?1:0,to=1-from,start=performance.now(),duration=520;
+  spineMotion={from,to,progress:0};updateControls();
+  const frame=now=>{
+    if(!spineMotion)return;
+    spineMotion.progress=clamp((now-start)/duration);draw();
+    if(spineMotion.progress<1)raf=requestAnimationFrame(frame);
+    else{spineView=to===1;spineMotion=null;raf=0;updateControls();draw();}
+  };
+  raf=requestAnimationFrame(frame);return true;
+}
+
+const keepsakes = [
+  {sheet:0,title:'The ferryman’s pass',front:'A passage across the blackwater. The ink is still damp.',back:'On the reverse: “One passenger. No return promised.”',type:'pass'},
+  {sheet:3,title:'A rubbing of the mill key',front:'Graphite pressed into paper. The teeth form an unfamiliar pattern.',back:'“Try the door beneath the wheel.” Someone underlined it twice.',type:'key'},
+  {sheet:6,title:'A pressed reed',front:'A reed from the bank where the lanterns appeared.',back:'A small note: “It kept its colour after the water went black.”',type:'reed'},
+  {sheet:9,title:'The ferryman’s second pass',front:'The same seal, but a different hand.',back:'“You have already crossed.”',type:'pass'},
+  {sheet:12,title:'The last key rubbing',front:'The teeth match the marks in the old ledger.',back:'“Bring back what you borrowed.”',type:'key'},
+  {sheet:13,title:'A feather from the northbank',front:'A soft russet feather, bent as if it rode the river wind.',back:'The quill is dark on this side, with a pale mark near its tip.',type:'feather'}
+];
+const customInserts=[];
+let nextInsertId=1;
+const allInserts=()=>[...keepsakes,...customInserts];
+const itemTextures=new Map();
+const itemMounts=new Map(keepsakes.map(item=>[item.sheet,{
+  taped:false,anchorPage:null,frontPage:item.sheet*2,pageNumber:item.sheet*2,
+  back:false,under:false,outside:false,outsideX:500,outsideY:130,u:.64,v:.82,rotation:-.07
+}]));
+const mountedTextures=new Map();
+function itemState(item){return itemMounts.get(item.sheet);}
+function itemsOnPage(number) {
+  if(number < -1 || number > pageCount)return [];
+  return allInserts().filter(item=>{
+    const state=itemState(item);
+    return state.taped?state.anchorPage===number:!state.outside&&state.pageNumber===number;
+  });
+}
+function sheetItem(number){return itemsOnPage(number)[0];}
+
+function itemPose(item,number) {
+  const state=itemState(item),back=!state.taped&&state.back;
+  // Loose cards rest on the exposed face. They are carried by the turning
+  // surface, not tucked underneath it or offset after landing.
+  return {u:clamp(state.u,.08,.94),v:state.v,rotation:state.rotation,back,under:false};
+}
+
+function itemTexture(item,back) {
+  const key=item.sheet+':'+back;if(itemTextures.has(key))return itemTextures.get(key);
+  const c=document.createElement('canvas');c.width=180;c.height=136;
+  const p=c.getContext('2d');p.imageSmoothingEnabled=false;
+  if(item.type!=='feather')p.drawImage(assets.c,0,0,c.width,c.height);
+  p.fillStyle='#6e402b';p.strokeStyle='#79422d';p.lineWidth=2;
+  p.font='bold 11px monospace';
+  if(item.type==='feather') {
+    p.save();p.translate(90,68);if(back)p.scale(-1,1);p.rotate(.08);
+    p.drawImage(assets.feather,-61,-61,122,122);p.restore();
+  } else if(back) {
+    ink(p,'FOR THE KEEPER',20,23,1.1);
+    const lines=item.back.replace(/[“”]/g,'').split(' ');let line='',y=49;
+    p.font='italic 12px Georgia';
+    lines.forEach(word=>{if((line+word).length>23){ink(p,line,20,y,1);line='';y+=14;}line+=word+' ';});ink(p,line,20,y,1);
+    p.strokeStyle='#914a38';p.beginPath();p.moveTo(23,112);p.lineTo(142,106);p.stroke();
+  } else if(item.type==='pass') {
+    ink(p,'BLACKWATER FERRY',18,23,1);ink(p,'ONE PASSAGE',18,40,1);
+    p.strokeRect(17,15,145,100);p.beginPath();p.moveTo(32,80);p.lineTo(130,80);p.lineTo(111,94);p.lineTo(48,94);p.closePath();p.stroke();
+    p.beginPath();p.moveTo(80,80);p.lineTo(80,48);p.lineTo(105,72);p.lineTo(80,72);p.stroke();
+    p.fillStyle='#913e38';p.fillRect(127,85,25,23);p.fillStyle='#e2ad66';ink(p,'VII',131,92,1);
+  } else if(item.type==='note') {
+    ink(p,'LOOSE NOTE',18,23,1.1);p.strokeStyle='#8c633e';p.strokeRect(14,13,150,108);
+    p.beginPath();p.moveTo(24,54);p.lineTo(149,54);p.moveTo(24,70);p.lineTo(128,70);p.moveTo(24,86);p.lineTo(140,86);p.stroke();
+    ink(p,'?',142,108,1.4);
+  } else if(item.type==='key') {
+    ink(p,'MILL / RUBBING',18,23,1.1);p.strokeStyle='#554738';p.lineWidth=4;
+    p.beginPath();p.arc(48,67,15,0,Math.PI*2);p.moveTo(62,67);p.lineTo(142,67);p.lineTo(142,86);p.moveTo(128,68);p.lineTo(128,80);p.stroke();
+    ink(p,'the door below',31,105,1);
+  } else {
+    ink(p,'BANK / NORTH',20,23,1.1);p.strokeStyle='#596344';p.lineWidth=3;
+    p.beginPath();p.moveTo(61,115);p.lineTo(104,37);p.moveTo(76,89);p.lineTo(46,72);p.moveTo(88,66);p.lineTo(124,57);p.stroke();
+    p.fillStyle='#7e6440';for(let i=0;i<6;i++)p.fillRect(98+i,34+i*4,10,8);
+  }
+  itemTextures.set(key,c);return c;
+}
+
+function mountedTexture(item,back=false) {
+  const taped=itemState(item).taped,key=item.sheet+':'+back+':'+taped;
+  if(mountedTextures.has(key))return mountedTextures.get(key);
+  const c=document.createElement('canvas');c.width=208;c.height=164;
+  const p=c.getContext('2d');p.imageSmoothingEnabled=false;
+  p.drawImage(itemTexture(item,taped?false:back),14,14,180,136);
+  if(taped) {
+    // Two translucent strips run along the flat left/right edges. Their
+    // overhang blends with the actual page underneath rather than a baked fill.
+    const tapeSpots=item.type==='feather'?[[90,27],[90,117]]:[[6,31],[184,31]];
+    for(const [x,startY] of tapeSpots) {
+      p.fillStyle='rgba(238,222,176,.34)';
+      if(item.type==='feather') {
+        p.beginPath();p.moveTo(x-35,startY);p.lineTo(x-31,startY-3);p.lineTo(x-24,startY);p.lineTo(x+27,startY-2);p.lineTo(x+35,startY+1);
+        p.lineTo(x+32,startY+7);p.lineTo(x-30,startY+6);p.closePath();p.fill();
+        p.strokeStyle='rgba(255,248,218,.38)';p.lineWidth=1;p.beginPath();p.moveTo(x-30,startY+1);p.lineTo(x+30,startY+2);p.stroke();
+      } else {
+        p.beginPath();p.moveTo(x, startY);p.lineTo(x+5,startY-3);p.lineTo(x+9,startY);p.lineTo(x+14,startY-2);p.lineTo(x+18,startY+1);
+        p.lineTo(x+18,131);p.lineTo(x+13,134);p.lineTo(x+9,132);p.lineTo(x+4,135);p.lineTo(x,132);p.closePath();p.fill();
+        p.strokeStyle='rgba(255,248,218,.38)';p.lineWidth=1;p.beginPath();p.moveTo(x+2,startY+2);p.lineTo(x+2,129);p.stroke();
+        p.strokeStyle='rgba(103,83,45,.22)';p.beginPath();p.moveTo(x+17,startY+3);p.lineTo(x+17,130);p.stroke();
+        p.fillStyle='rgba(255,248,222,.12)';p.fillRect(x+7,startY+4,3,92);
+      }
+    }
+  }
+  mountedTextures.set(key,c);return c;
+}
+
+function sampleChain(chain,u) {
+  const f=clamp(u)*SEGMENTS,i=Math.min(SEGMENTS-1,Math.floor(f)),t=f-i;
+  return {x:mix(chain[i].x,chain[i+1].x,t),z:mix(chain[i].z,chain[i+1].z,t),u};
+}
+
+function paintItem(item,back,position,scale=1,rotation=-.08,hit=false,pageNumber=null,underY=null,side=null) {
+  if(Math.abs(scale)<.003)return;
+  const itemSize=item.type==='feather'?3:1,width=128*itemSize,height=96*itemSize;
+  ctx.save();
+  if(side!==null) {
+    ctx.beginPath();ctx.rect(side>0?CX:0,TOP-90,side>0?W-CX:CX,H+180);ctx.clip();
+  }
+  ctx.translate(position.x,position.y);ctx.rotate(rotation);ctx.scale(scale,1);
+  ctx.shadowColor='#28101688';ctx.shadowOffsetY=4;ctx.shadowBlur=5;
+  ctx.drawImage(itemTexture(item,back),-width/2,-height/2,width,height);ctx.restore();
+  if(hit) {
+    const cs=Math.cos(rotation),sn=Math.sin(rotation);
+    const polygon=[[-width/2,-height/2],[width/2,-height/2],[width/2,height/2],[-width/2,height/2]]
+      .map(([x,y])=>({x:position.x+(x*cs-y*sn)*scale,y:position.y+(x*sn+y*cs)*scale}));
+    itemHits.push({item,back,pageNumber,underY,side,x:position.x,y:position.y,w:width*Math.abs(scale),h:height,xpoly:polygon,polygon});
+  }
+}
+
+function sampleItemChain(chain,u) {
+  if(u>=0&&u<=1)return sampleChain(chain,u);
+  const a=u<0?chain[0]:chain[SEGMENTS-1],b=u<0?chain[1]:chain[SEGMENTS];
+  const t=(u-a.u)/(b.u-a.u);
+  return {x:mix(a.x,b.x,t),z:mix(a.z,b.z,t),u};
+}
+
+function insertSurfacePoint(chain,side,number,u,v) {
+  if(number===-1||number===pageCount) {
+    const x=side<0?BOARD_SEAM-u*(BOARD_SEAM-40):SPINE_END+u*(984-SPINE_END);
+    return coverPoint(x,55+v*450);
+  }
+  return project(sampleItemChain(chain,u),v);
+}
+function rigidInsertPoint(chain,side,number,pose,rx,ry,width) {
+  const v=pose.v+ry/PAGE_H;
+  if(number===-1||number===pageCount)return insertSurfacePoint(chain,side,number,pose.u+side*rx/PAGE_W,v);
+  const anchor=sampleItemChain(chain,pose.u),span=width/(2*PAGE_W);
+  const a=sampleItemChain(chain,pose.u-span),b=sampleItemChain(chain,pose.u+span),length=Math.hypot(b.x-a.x,b.z-a.z)||1;
+  return project({x:anchor.x+side*rx*(b.x-a.x)/length,z:anchor.z+side*rx*(b.z-a.z)/length},v);
+}
+
+function paintPageItem(item,chain,side,number,{faceOnly=false,hit=false,occlude=false}={}) {
+  const pose=itemPose(item,number),front=mountedTexture(item,pose.back),reverse=faceOnly?null:mountedTexture(item,!pose.back),itemSize=item.type==='feather'?3:1,
+    width=128*208/180*itemSize,height=96*164/136*itemSize;
+  const cs=Math.cos(pose.rotation),sn=Math.sin(pose.rotation);
+  const state=itemState(item);
+  // A loose photograph is a stiff card, not another piece of the flexible
+  // leaf. One tangent plane prevents its front/back strips folding through
+  // each other and cancelling to nothing at the curl's inflection.
+  const rigid=!state.taped&&number>=0&&number<pageCount;
+  const anchor=sampleItemChain(chain,pose.u),span=width/(2*PAGE_W);
+  const tangentA=sampleItemChain(chain,pose.u-span),tangentB=sampleItemChain(chain,pose.u+span);
+  const tangentLength=Math.hypot(tangentB.x-tangentA.x,tangentB.z-tangentA.z)||1;
+  const tangent={x:(tangentB.x-tangentA.x)/tangentLength,z:(tangentB.z-tangentA.z)/tangentLength};
+  const masked=occlude&&turningSheetDepth&&motion.progress>0&&motion.progress<1;
+  let target=ctx,cardDepth=null,cardU=null;
+  const bounds=[];
+  if(masked) {
+    if(insertLayer.width!==canvas.width||insertLayer.height!==canvas.height){insertLayer.width=canvas.width;insertLayer.height=canvas.height;}
+    target=insertLayerContext;target.setTransform(1,0,0,1,0,0);target.clearRect(0,0,insertLayer.width,insertLayer.height);
+    target.setTransform(ctx.getTransform());target.imageSmoothingEnabled=false;
+    cardDepth=new Float32Array(canvas.width*canvas.height);cardDepth.fill(-Infinity);
+    cardU=new Float32Array(cardDepth.length);cardU.fill(NaN);
+  }
+  const locate=(x,y)=>{
+    const rx=x*cs-y*sn,ry=x*sn+y*cs;
+    const u=pose.u+side*rx/PAGE_W,v=pose.v+ry/PAGE_H;
+    if(rigid)return project({x:anchor.x+side*rx*tangent.x,z:anchor.z+side*rx*tangent.z},v);
+    return insertSurfacePoint(chain,side,number,u,v);
+  };
+  for(let i=0;i<12;i++)for(let row=0;row<4;row++) {
+    const x0=(i/12-.5)*width,x1=((i+1)/12-.5)*width;
+    const y0=(row/4-.5)*height,y1=((row+1)/4-.5)*height;
+    const centerU=pose.u+side*(((x0+x1)*.5)*cs-((y0+y1)*.5)*sn)/PAGE_W;
+    const a=sampleItemChain(chain,centerU-.001),b=sampleItemChain(chain,centerU+.001);
+    const turnedOver=(rigid?tangent.x:b.x-a.x)*side<0;
+    // Tape belongs to one face of the sheet and disappears with that face.
+    // A loose card turns with the sheet and shows its own reverse instead.
+    if(faceOnly&&turnedOver)continue;
+    const image=turnedOver?reverse:front;
+    const u0=turnedOver?1-i/12:i/12,u1=turnedOver?1-(i+1)/12:(i+1)/12;
+    const points=[locate(x0,y0),locate(x1,y0),locate(x1,y1),locate(x0,y1)];
+    quad(image,[{x:u0*image.width,y:row/4*image.height},{x:u1*image.width,y:row/4*image.height},
+      {x:u1*image.width,y:(row+1)/4*image.height},{x:u0*image.width,y:(row+1)/4*image.height}],
+      points,target);
+    if(masked) {
+      const depths=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]].map(([x,y])=>pose.v+(x*sn+y*cs)/PAGE_H);
+      const us=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]].map(([x,y])=>pose.u+side*(x*cs-y*sn)/PAGE_W);
+      rasterDepthQuad(points,depths,cardDepth,us,cardU);bounds.push(...points);
+    }
+  }
+  if(rigid&&(!faceOnly||tangent.x*side>=0)) {
+    const corners=[[-width/2+10,-height/2+10],[width/2-10,-height/2+10],[width/2-10,height/2-10],[-width/2+10,height/2-10]].map(([x,y])=>locate(x,y));
+    // Retain a hairline edge through the genuinely edge-on instant, rather
+    // than letting all textured triangles fall below the rasterizer cutoff.
+    if(Math.abs(tangent.x)<.12){target.save();target.strokeStyle='#b77a42';target.lineWidth=1;target.beginPath();target.moveTo(corners[0].x,corners[0].y);corners.slice(1).forEach(p=>target.lineTo(p.x,p.y));target.closePath();target.stroke();target.restore();}
+  }
+  if(masked&&bounds.length) {
+    const transform=ctx.getTransform(),pixels=bounds.map(p=>({x:transform.a*p.x+transform.c*p.y+transform.e,y:transform.b*p.x+transform.d*p.y+transform.f}));
+    const x=Math.max(0,Math.floor(Math.min(...pixels.map(p=>p.x)))-2),y=Math.max(0,Math.floor(Math.min(...pixels.map(p=>p.y)))-2);
+    const width=Math.min(canvas.width-x,Math.ceil(Math.max(...pixels.map(p=>p.x)))+2-x),height=Math.min(canvas.height-y,Math.ceil(Math.max(...pixels.map(p=>p.y)))+2-y);
+    if(width>0&&height>0) {
+      const image=target.getImageData(x,y,width,height),data=image.data;
+      const hiddenFace=rigid&&tangent.x*side<0&&motion.progress<1;
+      for(let py=0;py<height;py++)for(let px=0;px<width;px++) {
+        const index=(y+py)*canvas.width+x+px,paper=turningSheetDepth[index],card=cardDepth[index];
+        const sameContactPatch=Math.abs(turningSheetU[index]-cardU[index])<span;
+        if(Number.isFinite(paper)&&(hiddenFace||!sameContactPatch&&paper>card+.002))data[(py*width+px)*4+3]=0;
+      }
+      target.putImageData(image,x,y);
+      ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(insertLayer,x,y,width,height,x,y,width,height);ctx.restore();
+    }
+  }
+  if(hit) {
+    const polygon=[[-width/2,-height/2],[width/2,-height/2],[width/2,height/2],[-width/2,height/2]].map(([x,y])=>locate(x,y));
+    const xs=polygon.map(p=>p.x),ys=polygon.map(p=>p.y),{x,y}=locate(0,0);
+    itemHits.push({item,back:pose.back,pageNumber:number,underY:null,side,x,y,w:Math.max(...xs)-Math.min(...xs),h:Math.max(...ys)-Math.min(...ys),polygon});
+  }
+}
+
+function restingItems(chain,number,side,layer='over') {
+  for(const item of itemsOnPage(number)) {
+    const pose=itemPose(item,number),state=itemState(item);
+    if(itemDrag?.item===item)continue;
+    if((layer==='under')!==pose.under)continue;
+    paintPageItem(item,chain,side,number,{faceOnly:state.taped,hit:!motion&&!coverMotion});
+  }
+}
+
+function turningItems(chain,layer='over') {
+  if(layer==='under')return;
+  const sourceNumber=motion.direction===1?spread*2:spread*2-1;
+  const destination=sourceNumber+motion.direction;
+  const items=[...new Set([...itemsOnPage(sourceNumber),...itemsOnPage(destination)])];
+  for(const item of items) {
+    const state=itemState(item);
+    if(state.taped) {
+      const side=state.anchorPage===sourceNumber?motion.direction:-motion.direction;
+      paintPageItem(item,chain,side,state.anchorPage,{faceOnly:true,occlude:true});continue;
+    }
+    if(state.pageNumber===sourceNumber) {
+      // Until it lands, even a loose card occupies only the source face.
+      // The opaque reverse of the leaf must not reveal the photo behind it.
+      paintPageItem(item,chain,motion.direction,sourceNumber,{faceOnly:true,occlude:true});
+    } else if(state.pageNumber===destination) {
+      paintPageItem(item,chain,-motion.direction,destination,{faceOnly:true,occlude:true});
+    }
+  }
+}
+
+function itemHit(point) {
+  const contains=(polygon)=>{
+    let inside=false;
+    for(let i=0,j=polygon.length-1;i<polygon.length;j=i++) {
+      const a=polygon[i],b=polygon[j];
+      if((a.y>point.y)!==(b.y>point.y)&&point.x<(b.x-a.x)*(point.y-a.y)/(b.y-a.y)+a.x)inside=!inside;
+      const dx=b.x-a.x,dy=b.y-a.y,t=clamp(((point.x-a.x)*dx+(point.y-a.y)*dy)/(dx*dx+dy*dy||1));
+      if(Math.hypot(point.x-a.x-t*dx,point.y-a.y-t*dy)<8)return true;
+    }
+    return inside;
+  };
+  return itemHits.slice().reverse().find(h=>Math.abs(point.x-h.x)<h.w/2+8&&Math.abs(point.y-h.y)<h.h/2+8
+    &&(!h.polygon||contains(h.polygon))
+    &&(h.underY===null||point.y>h.underY+1));
+}
+
+function refreshKeepsakes() {
+  const container=$('.keepsakes');container.replaceChildren();
+  if(closedEdge||coverMotion)return;
+  for(const number of [spread*2-1,spread*2]) {
+    for(const item of itemsOnPage(number)) {
+      const state=itemState(item),pose=itemPose(item,number);
+      const button=document.createElement('button');button.textContent='Inspect: '+item.title+(state.taped?' · taped':pose.under?' · tucked':'');
+      button.disabled=!!motion;button.onclick=()=>openItem(item,pose.back,number);container.append(button);
+    }
+  }
+}
+
+function renderInspection(scale=1,back=inspection.back) {
+  const taped=itemState(inspection.item).taped;if(taped)back=false;
+  const c=$('#item-art'),p=c.getContext('2d');p.clearRect(0,0,c.width,c.height);
+  p.imageSmoothingEnabled=false;p.save();p.translate(c.width/2,c.height/2);p.scale(scale,1);p.rotate(-.045);
+  p.shadowColor='#0008';p.shadowOffsetY=12;p.shadowBlur=20;
+  p.drawImage(mountedTexture(inspection.item,back),-156,-123,312,246);p.restore();
+  $('#item-description').textContent=back?inspection.item.back:inspection.item.front;
+  $('#flip-item').textContent=back?'Show front ↻':'Show back ↻';
+  $('#flip-item').hidden=taped;
+  $('#tape-item').textContent=taped?'Remove tape':'Tape in place';
+  $('#tape-item').setAttribute('aria-pressed',String(taped));
+  $('#tape-item').disabled=inspection.animating;
+  $('#mount-status').textContent=taped?'Taped to page '+(inspection.pageNumber+1)+' · remove tape to see the back.':'Loose insert · both sides can be inspected.';
+}
+
+function openItem(item,back,pageNumber=null) {
+  if(motion||coverMotion||closedEdge)return;
+  const state=itemState(item);
+  if(pageNumber===null)pageNumber=state.taped?state.anchorPage:state.pageNumber;
+  stopAuto();inspection={item,back:state.taped?false:back,pageNumber,animating:false};
+  $('#item-title').textContent=item.title;renderInspection();$('#inspect').showModal();
+}
+
+$('#flip-item').onclick=()=>{
+  if(!inspection||inspection.animating||itemState(inspection.item).taped)return;
+  inspection.animating=true;const start=performance.now(),old=inspection.back;
+  const frame=now=>{
+    if(!inspection)return;
+    const p=clamp((now-start)/480),back=p<.5?old:!old;
+    renderInspection(Math.abs(Math.cos(Math.PI*sine(p))),back);
+    if(p<1)requestAnimationFrame(frame);else{inspection.back=!old;inspection.animating=false;renderInspection();}
+  };requestAnimationFrame(frame);
+};
+$('#tape-item').onclick=()=>{
+  if(!inspection||inspection.animating)return;
+  const state=itemState(inspection.item),pose=itemPose(inspection.item,inspection.pageNumber);
+  if(state.taped) {
+    state.taped=false;state.frontPage=state.anchorPage;state.pageNumber=state.anchorPage;
+    state.back=false;state.under=false;state.anchorPage=null;
+  } else {
+    state.u=pose.u;state.v=pose.v;state.rotation=pose.rotation;
+    state.taped=true;state.anchorPage=inspection.pageNumber;state.pageNumber=inspection.pageNumber;
+  }
+  inspection.back=false;mountedTextures.clear();refreshKeepsakes();draw();renderInspection();
+};
+$('#close-item').onclick=()=>$('#inspect').close();
+$('#inspect').addEventListener('close',()=>{inspection=null;});
+$('#inspect').addEventListener('click',e=>{if(e.target===$('#inspect')){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
+
+function editablePages() {
+  if(closedEdge)return [];
+  if(spread===0)return [0];
+  if(spread===spreadCount()-1)return [pageCount-1];
+  return [spread*2-1,spread*2].filter(number=>number<pageCount);
+}
+
+function loadPageIntoEditor(number) {
+  if(!Number.isInteger(number))return;
+  const base=entries[number%entries.length],custom=bookContent.pages[number]||{};
+  $('#edit-eyebrow').value=custom.eyebrow??base[0];
+  $('#edit-title').value=custom.title??base[1];
+  $('#edit-body').value=custom.body??base[2];
+  $('#page-role').value=pageRole(number);$('#toc-label').value=custom.tocLabel||defaultSections[number]||'';
+  $('#page-font').value=custom.font||'pixel';$('#page-ink').value=custom.ink||'#5b3e2d';
+  $('#page-paper').value=custom.paper||'cream';$('#page-number-position').value=custom.pageNumberPlacement||'bottom-center';
+  selectedEditPage=number;
+  selectedPageImage=-1;refreshPageImages();
+}
+
+function refreshPageImages(){
+  const images=(bookContent.pages[selectedEditPage]||{}).images||[],list=$('#page-images');
+  list.replaceChildren(...images.map((image,index)=>{const button=document.createElement('button');button.type='button';button.textContent=`Image ${index+1}`;button.setAttribute('aria-pressed',String(index===selectedPageImage));button.onclick=()=>{selectedPageImage=index;refreshPageImages();};return button;}));
+  $('#edit-image-pixels').disabled=selectedPageImage<0;$('#remove-page-image').disabled=selectedPageImage<0;
+}
+
+function currentPage(){return Number.isInteger(selectedEditPage)?(bookContent.pages[selectedEditPage]||(bookContent.pages[selectedEditPage]={})):null;}
+function persistEditedPage(){persistBookContent();textures.clear();draw();}
+
+$('#add-text').onclick=()=>{const text=$('#insert-text').value.trim();if(!text)return;const page=currentPage();if(!page)return;const body=$('#edit-body').value;page.body=body+(body?'\n':'')+text;$('#edit-body').value=page.body;$('#insert-text').value='';saveEditedPage();};
+$('#page-image-file').onchange=async e=>{
+  const file=e.target.files?.[0];if(!file)return;
+  const source=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.readAsDataURL(file);});
+  const image=new Image();image.onload=()=>{const scale=Math.min(1,360/image.width,300/image.height),w=Math.round(image.width*scale),h=Math.round(image.height*scale),c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(image,0,0,w,h);const page=currentPage();if(!page)return;page.images=page.images||[];page.images.push({src:c.toDataURL('image/png'),x:Math.round((PAGE_W-w)/2),y:190,w,h});selectedPageImage=page.images.length-1;persistEditedPage();refreshPageImages();};image.src=source;e.target.value='';
+};
+$('#remove-page-image').onclick=()=>{const page=currentPage();if(!page||selectedPageImage<0)return;page.images.splice(selectedPageImage,1);selectedPageImage=-1;persistEditedPage();refreshPageImages();};
+$('#edit-image-pixels').onclick=()=>{
+  const page=currentPage(),imageData=page?.images?.[selectedPageImage];if(!imageData)return;
+  pixelMode='image';const image=new Image();image.onload=()=>{const c=$('#pixel-art'),p=c.getContext('2d');p.clearRect(0,0,c.width,c.height);p.drawImage(image,0,0,c.width,c.height);$('#pixel-editor').open=true;};image.src=imageData.src;
+};
+function editorPoint(event){const rect=$('#pixel-art').getBoundingClientRect();return{x:(event.clientX-rect.left)*400/rect.width,y:(event.clientY-rect.top)*350/rect.height};}
+function drawEditorStroke(point){const p=$('#pixel-art').getContext('2d'),size=Number($('#brush-size').value);p.save();p.globalCompositeOperation=$('#eraser').getAttribute('aria-pressed')==='true'?'destination-out':'source-over';p.fillStyle=document.querySelector('input[name="draw-ink"]:checked').value;p.beginPath();p.arc(point.x,point.y,size/2,0,Math.PI*2);p.fill();p.restore();}
+$('#pixel-art').onpointerdown=e=>{drawingState=true;e.currentTarget.setPointerCapture(e.pointerId);drawEditorStroke(editorPoint(e));};
+$('#pixel-art').onpointermove=e=>{if(drawingState)drawEditorStroke(editorPoint(e));};
+$('#pixel-art').onpointerup=$('#pixel-art').onpointercancel=()=>{drawingState=false;};
+$('#brush-size').oninput=e=>$('#brush-size-value').textContent=`${e.target.value} px`;
+$('#eraser').onclick=e=>{const on=e.currentTarget.getAttribute('aria-pressed')!=='true';e.currentTarget.setAttribute('aria-pressed',String(on));};
+$('#clear-art').onclick=()=>$('#pixel-art').getContext('2d').clearRect(0,0,400,350);
+$('#save-art').onclick=()=>{const page=currentPage();if(!page)return;const data=$('#pixel-art').toDataURL('image/png');if(pixelMode==='image'&&page.images?.[selectedPageImage])page.images[selectedPageImage].src=data;else page.art=data;persistEditedPage();};
+
+function renderShelf(){
+  const container=$('#shelf-books');container.replaceChildren();$('#shelf-empty').hidden=savedBooks.length>0;
+  savedBooks.forEach(book=>{
+    const button=document.createElement('button');button.type='button';button.className='shelf-spine';
+    button.style.setProperty('--spine-width',`${Math.min(48,22+book.pageCount*.45)}px`);
+    button.style.setProperty('--shelf-leather',book.palette?.outside||'#9b382d');
+    button.style.setProperty('--shelf-metal',book.palette?.metal==='silver'?'#dce6ee':'#f0cd82');
+    button.innerHTML=`<span>${escapeText(book.name)}</span><small>${book.pageCount} pages</small>`;
+    button.onclick=()=>openSavedBook(book.id);container.append(button);
+  });
+}
+function escapeText(value){const el=document.createElement('span');el.textContent=value;return el.innerHTML;}
+function saveBook(copy=false){
+  bookName=$('#book-name').value.trim()||'Untitled book';bookContent.name=bookName;
+  let book=!copy&&savedBooks.find(entry=>entry.id===activeBookId);
+  // A rename is a new shelf edition, not an in-place replacement. Keep the
+  // previous named spine and make the renamed save its own book entry.
+  if(book&&book.name!==bookName)book=null;
+  if(!book){book={id:crypto.randomUUID(),name:bookName,pageCount,pages:{},covers:{}};savedBooks.push(book);activeBookId=book.id;localStorage.setItem('keepers-book-active',activeBookId);}
+  book.name=bookName;book.pageCount=pageCount;book.pages=structuredClone(bookContent.pages);book.covers=structuredClone(bookContent.covers);book.palette={...bookContent.palette};book.savedAt=Date.now();
+  localStorage.setItem('keepers-book-shelf-v1',JSON.stringify(savedBooks));persistBookContent();$('#status').textContent='Saved to your shelf.';renderShelf();
+}
+function openSavedBook(id){
+  const book=savedBooks.find(entry=>entry.id===id);if(!book)return;
+  bookName=book.name;bookContent.name=book.name;bookContent.pageCount=book.pageCount;pageCount=book.pageCount;
+  bookContent.pages=structuredClone(book.pages||{});bookContent.covers={front:{},back:{},...(book.covers||{})};bookContent.palette={outside:'#9b382d',inside:'#c85e68',metal:'gold',...(book.palette||{})};activeBookId=id;localStorage.setItem('keepers-book-active',id);
+  $('#book-name').value=bookName;$('#outside-color').value=bookContent.palette.outside;$('#inside-color').value=bookContent.palette.inside;$('#metal-color').value=bookContent.palette.metal;
+  applyBookPalette(false);spread=0;closedEdge=null;motion=null;queuedTurns=[];textures.clear();updateControls();draw();$('#shelf').close();persistBookContent();
+}
+$('#save-book').onclick=()=>saveBook(false);$('#save-copy').onclick=()=>saveBook(true);
+$('#book-name').oninput=()=>{bookName=$('#book-name').value;persistBookContent();draw();};
+$('#shelf-open').onclick=()=>{renderShelf();$('#shelf').showModal();};
+$('#close-shelf').onclick=$('#close-shelf-action').onclick=()=>$('#shelf').close();
+['#outside-color','#inside-color','#metal-color'].forEach(selector=>$(selector).onchange=()=>{
+  bookContent.palette.outside=$('#outside-color').value;bookContent.palette.inside=$('#inside-color').value;bookContent.palette.metal=$('#metal-color').value;
+  persistBookContent();applyBookPalette();
+});
+
+function refreshContentEditor() {
+  const coverMode=!!closedEdge;
+  $('#page-editor').hidden=coverMode;$('#cover-editor').hidden=!coverMode;
+  if(coverMode) {
+    const mode=`cover:${closedEdge}`,cover=coverContent(closedEdge);
+    $('#content-editor-summary').textContent=closedEdge==='front'?'Design the front cover':'Design the back cover';
+    $('#editor-context').textContent='Add lettering and a gilded symbol to this cover. Changes appear on the book and save in this browser.';
+    if(editorMode!==mode) {
+      $('#cover-title').value=cover.title||'';
+      $('#cover-font').value=cover.font||'serif';
+      $('#cover-placement').value=cover.placement||'center';
+      editorMode=mode;
+      updateSymbolSelection(Number.isInteger(cover.symbol)?cover.symbol:-1);
+    }
+    editorPageList='';return;
+  }
+  const pages=editablePages(),listKey=pages.join(',');
+  $('#content-editor-summary').textContent='Write on the visible page';
+  $('#editor-context').textContent=pages.length===1?'Edit the page currently open by the cover.':'Choose either visible page and edit its section label, title, and writing. Title and contents pages are excluded from automatic numbering.';
+  const select=$('#edit-page');
+  if(editorPageList!==listKey) {
+    select.replaceChildren(...pages.map(number=>new Option(`Page ${number+1}${pages.length>1?(number%2?' · left':' · right'):''}`,String(number))));
+    editorPageList=listKey;
+    if(!pages.includes(selectedEditPage))selectedEditPage=pages[0];
+    if(Number.isInteger(selectedEditPage))select.value=String(selectedEditPage);
+  }
+  if(editorMode!=='page'||selectedEditPage!==Number(select.value)) {
+    editorMode='page';loadPageIntoEditor(Number(select.value));
+  }
+}
+
+function updateSymbolSelection(selected) {
+  document.querySelectorAll('.symbol-choice').forEach(button=>{
+    const active=Number(button.dataset.symbol)===selected;
+    button.classList.toggle('selected',active);button.setAttribute('aria-pressed',String(active));
+  });
+}
+
+function initSymbolPicker() {
+  const picker=$('#cover-symbols');
+  coverSymbolNames.forEach((name,index)=>{
+    const button=document.createElement('button'),col=index%6,row=Math.floor(index/6);
+    button.type='button';button.className='symbol-choice';button.dataset.symbol=String(index);
+    button.title=name;button.setAttribute('aria-label',name);
+    button.style.backgroundPosition=`${col*20}% ${row*20}%`;
+    picker.append(button);
+  });
+  picker.addEventListener('click',event=>{
+    const button=event.target.closest('.symbol-choice');if(!button||!closedEdge)return;
+    const selected=Number(button.dataset.symbol);coverContent(closedEdge).symbol=selected;
+    persistBookContent();updateSymbolSelection(selected);draw();
+  });
+  $('#remove-symbol').onclick=()=>{
+    if(!closedEdge)return;
+    coverContent(closedEdge).symbol=-1;persistBookContent();updateSymbolSelection(-1);draw();
+  };
+}
+
+function updateControls() {
+  $('#pagination').textContent=closedEdge?`${closedEdge.toUpperCase()} COVER`:spread===0?'INSIDE FRONT — 1':spread===spreadCount()-1?`${pageCount} — INSIDE BACK`:`${spread*2} — ${Math.min(spread*2+1,pageCount)} / ${pageCount}`;
+  $('#position').value=spread;
+  $('#position').max=spreadCount()-1;
+  $('#page-count').value=pageCount;
+  const viewLocked=spineView||!!spineMotion||!!closedFlipMotion;
+  $('#previous').disabled=viewLocked||!!motion||!!coverMotion||closedEdge==='front';
+  $('#next').disabled=viewLocked||!!motion||!!coverMotion||closedEdge==='back';
+  $('#previous').setAttribute('aria-label',closedEdge==='back'?'Open back cover':spread===0?'Close front cover':'Previous spread');
+  $('#next').setAttribute('aria-label',closedEdge==='front'?'Open front cover':spread===spreadCount()-1?'Close back cover':'Next spread');
+  $('#close-book').hidden=!!closedEdge||!!motion||!!coverMotion||(spread!==0&&spread!==spreadCount()-1);
+  $('#flip-closed').hidden=!closedEdge||!!coverMotion||!!closedFlipMotion||spineView||!!spineMotion;
+  $('#flip-closed').textContent=closedEdge==='front'?'Flip to back cover':'Flip to front cover';
+  $('#spine-view').textContent=spineView?'Return to book':'View spine';
+  $('#spine-view').setAttribute('aria-pressed',String(spineView));
+  $('#spine-view').disabled=!!motion||!!coverMotion||!!closedFlipMotion||!!spineMotion||!!inspection;
+  refreshContentEditor();
+  refreshKeepsakes();
+}
+
+function stopAuto() {
+  clearTimeout(autoTimer);autoTimer=0;
+  $('#autoplay').setAttribute('aria-pressed','false');
+}
+
+function finish(commit) {
+  if(commit) {
+    const source=motion.direction===1?spread*2:spread*2-1,destination=source-motion.direction;
+    for(const item of allInserts()) {
+      const state=itemState(item);
+      if(state.taped||state.outside)continue;
+      if(state.pageNumber===source) {
+        state.pageNumber=destination;state.back=!state.back;
+        // Deposit onto the face that was opposite before this turn, not
+        // onto the reverse of the moving leaf. The landed leaf can cover it;
+        // turning that leaf back uncovers it on its new supporting page.
+        state.under=false;
+        state.rotation=-state.rotation;
+      }
+    }
+    spread+=motion.direction;
+  }
+  motion=null;raf=0;updateControls();draw();
+  if(queuedTurns.length) {
+    const next=queuedTurns.shift();
+    if(begin(next,true))settle(true,78);
+    else finish(false);
+    return;
+  }
+  if($('#autoplay').getAttribute('aria-pressed')==='true') {
+    autoTimer=setTimeout(()=>{
+      if(spread===spreadCount()-1&&autoDirection>0)animateCover('back',true);
+      else if(spread===0&&autoDirection<0)animateCover('front',true);
+      else begin(autoDirection);
+    },550);
+  }
+}
+
+function settle(commit=true,overrideDuration=null) {
+  const start=motion.progress,target=commit?1:0;
+  const duration=(overrideDuration??Number($('#speed').value))*Math.abs(target-start),time=performance.now();
+  const frame=now=>{
+    if(!motion)return;
+    const t=clamp((now-time)/Math.max(1,duration));
+    motion.progress=mix(start,target,t);draw();
+    if(t<1)raf=requestAnimationFrame(frame);else finish(commit);
+  };
+  raf=requestAnimationFrame(frame);
+}
+
+function begin(direction,manual=false) {
+  if(!loaded||coverMotion||closedFlipMotion||spineView||spineMotion||inspection)return false;
+  if(motion) {
+    // Preserve quick repeated button presses instead of ignoring them mid-turn.
+    if(queuedTurns.length<24)queuedTurns.push(direction);
+    return true;
+  }
+  if(closedEdge){if((closedEdge==='front'&&direction<0)||(closedEdge==='back'&&direction>0))return false;return animateCover(closedEdge,false);}
+  if(spread===0&&direction<0)return animateCover('front',true);
+  if(spread===spreadCount()-1&&direction>0)return animateCover('back',true);
+  if(spread+direction<0||spread+direction>=spreadCount())return false;
+  clearTimeout(autoTimer);autoTimer=0;
+  motion={direction,progress:0};updateControls();
+  if(!manual)settle(true);
+  return true;
+}
+
+$('#next').onclick=()=>begin(1);
+$('#previous').onclick=()=>begin(-1);
+$('#flip-closed').onclick=flipClosedBook;
+$('#spine-view').onclick=animateSpineView;
+$('#edit-page').onchange=e=>{selectedEditPage=Number(e.target.value);loadPageIntoEditor(selectedEditPage);};
+function saveEditedPage() {
+  if(!Number.isInteger(selectedEditPage))return;
+  const previous=bookContent.pages[selectedEditPage]||{};
+  bookContent.pages[selectedEditPage]={...previous,eyebrow:$('#edit-eyebrow').value,title:$('#edit-title').value,body:$('#edit-body').value,
+    role:$('#page-role').value,tocLabel:$('#toc-label').value,font:$('#page-font').value,ink:$('#page-ink').value,paper:$('#page-paper').value,pageNumberPlacement:$('#page-number-position').value};
+  persistBookContent();textures.clear();draw();
+}
+['#edit-eyebrow','#edit-title','#edit-body','#toc-label'].forEach(selector=>$(selector).addEventListener('input',saveEditedPage));
+['#page-role','#page-font','#page-ink','#page-paper','#page-number-position'].forEach(selector=>$(selector).addEventListener('change',()=>{saveEditedPage();updateControls();}));
+$('#edit-mode').onchange=e=>{editMode=e.target.checked;$('#page-edit-controls').hidden=!editMode;textures.clear();draw();};
+function saveCoverEditor() {
+  if(!closedEdge)return;
+  const cover=coverContent(closedEdge);
+  cover.title=$('#cover-title').value;cover.font=$('#cover-font').value;cover.placement=$('#cover-placement').value;
+  persistBookContent();draw();
+}
+['#cover-title','#cover-font','#cover-placement'].forEach(selector=>$(selector).addEventListener('input',saveCoverEditor));
+['#cover-font','#cover-placement'].forEach(selector=>$(selector).addEventListener('change',saveCoverEditor));
+initSymbolPicker();
+$('#position').oninput=e=>{
+  stopAuto();if(raf)cancelAnimationFrame(raf);
+  motion=null;coverMotion=null;closedEdge=null;drag=null;queuedTurns=[];spread=Number(e.target.value);updateControls();draw();
+};
+let pageCountInputTimer=0;
+function applyPageCount(input) {
+  stopAuto();if(raf)cancelAnimationFrame(raf);
+  const requested=Number(input.value);
+  pageCount=Number.isFinite(requested)?clamp(Math.round(requested/2)*2,8,56):28;
+  motion=null;coverMotion=null;closedEdge=null;drag=null;queuedTurns=[];
+  spread=clamp(spread,0,spreadCount()-1);
+  updateControls();draw();
+}
+$('#page-count').oninput=e=>{
+  // Number inputs can emit an intermediate digit while someone types (e.g.
+  // 5 then 6). Debounce the visual rebuild briefly; onchange commits at once.
+  clearTimeout(pageCountInputTimer);
+  pageCountInputTimer=setTimeout(()=>applyPageCount(e.target),180);
+};
+$('#page-count').onchange=e=>{clearTimeout(pageCountInputTimer);applyPageCount(e.target);};
+$('#close-book').onclick=()=>animateCover(spread===0?'front':'back',true);
+$('#blank').onchange=()=>draw();
+function refreshContent(){textures.clear();draw();}
+$('#hand').onchange=refreshContent;
+$('#margin-note').oninput=refreshContent;
+$('#autoplay').onclick=()=>{
+  const active=$('#autoplay').getAttribute('aria-pressed')==='true';
+  if(active)stopAuto();else {autoDirection=spread===spreadCount()-1?-1:1;$('#autoplay').setAttribute('aria-pressed','true');if(!motion)begin(autoDirection);}
+};
+document.addEventListener('keydown',e=>{
+  if(inspection)return;
+  if(['INPUT','SELECT'].includes(e.target.tagName))return;
+  if(e.key==='ArrowRight'){e.preventDefault();begin(1);}
+  if(e.key==='ArrowLeft'){e.preventDefault();begin(-1);}
+});
+function point(e) {const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}
+function pageAt(point) {
+  const hinge=CX+bookState().shift,side=point.x>hinge?1:-1,number=side>0?spread*2:spread*2-1;
+  const atFrontInside=side<0&&spread===0,atBackInside=side>0&&spread===spreadCount()-1;
+  const cover=atFrontInside||atBackInside;
+  const pageNumber=atFrontInside?-1:atBackInside?pageCount:number;
+  if(point.y<TOP-85||point.y>(cover?BOTTOM+60:BOTTOM+18))return null;
+  const distance=Math.abs(point.x-hinge);
+  if(distance<(cover?24:8)||distance>(cover?472:PAGE_W+18))return null;
+  if(!cover&&(pageNumber<0||pageNumber>=pageCount))return null;
+  return {side,number:pageNumber,cover};
+}
+function placeLooseItem(item,point,grab=null) {
+  const page=pageAt(point);
+  const state=itemState(item),book=bookState();
+  state.under=false;
+  if(!page) {
+    state.outside=true;state.pageNumber=null;
+    state.outsideX=clamp(point.x,68,W-68);state.outsideY=clamp(point.y,72,H-72);
+    return true;
+  }
+  state.outside=false;state.pageNumber=page.number;
+  const amount=page.side<0?spread/(spreadCount()-1):1-spread/(spreadCount()-1),chain=resting(page.side,amount);
+  let u=state.u??.5,v=state.v??.5;
+  const width=128*208/180*(item.type==='feather'?3:1),target=grab?grab.pointer:point;
+  const locate=(u,v)=>grab?rigidInsertPoint(chain,page.side,page.number,{u,v},grab.rx,grab.ry,width):insertSurfacePoint(chain,page.side,page.number,u,v);
+  // Invert the same curved/perspective surface used for drawing. Screen-space
+  // division by page width makes a released card jump, especially near the top.
+  for(let i=0;i<10;i++) {
+    const p=locate(u,v),a=locate(u+.001,v),b=locate(u,v+.001);
+    const ax=(a.x-p.x)/.001,ay=(a.y-p.y)/.001,bx=(b.x-p.x)/.001,by=(b.y-p.y)/.001;
+    const det=ax*by-ay*bx;if(Math.abs(det)<.001)break;
+    const dx=target.x-p.x,dy=target.y-p.y;
+    u+=(dx*by-dy*bx)/det;v+=(ax*dy-ay*dx)/det;
+  }
+  state.u=clamp(u,.08,.94);state.v=clamp(v,.04,.96);
+  return true;
+}
+
+function isDeadSpace(point) {
+  return point.y<TOP-38||point.y>BOTTOM+70||point.x<78||point.x>W-78;
+}
+
+function createLooseInsert(point) {
+  const sheet=1000+nextInsertId++,item={sheet,title:`Loose note ${nextInsertId-1}`,
+    front:'A scrap of paper, waiting for a note.',back:'The reverse is blank.',type:'note'};
+  customInserts.push(item);
+  itemMounts.set(sheet,{taped:false,anchorPage:null,frontPage:null,pageNumber:null,back:false,under:false,
+    outside:true,outsideX:clamp(point.x,68,W-68),outsideY:clamp(point.y,72,H-72),u:.5,v:.5,rotation:-.04});
+  draw();refreshKeepsakes();$('#status').textContent='Loose insert made. Drag it onto either page; right-click the empty margin to add another.';
+}
+
+canvas.addEventListener('contextmenu',e=>{
+  const p=point(e);
+  if(!loaded||closedEdge||coverMotion||spineView||spineMotion||motion||!isDeadSpace(p))return;
+  e.preventDefault();createLooseInsert(p);
+});
+canvas.addEventListener('pointerdown',e=>{
+  if(spineView||spineMotion)return;
+  if(closedEdge){animateCover(closedEdge,false);return;}
+  if(coverMotion)return;
+  const p=point(e);if(p.y<100||p.y>590)return;
+  const toc=tocHitAreas.find(area=>p.x>=area.x&&p.x<=area.x+area.w&&p.y>=area.y&&p.y<=area.y+area.h);
+  if(toc){navigateToChapter(toc.target);return;}
+  const hit=itemHit(p);
+  if(hit) {
+    const state=itemState(hit.item);
+    if(state.taped){openItem(hit.item,hit.back,hit.pageNumber);return;}
+    const angle=state.rotation,dx=p.x-hit.x,dy=p.y-hit.y;
+    const grabX=dx*Math.cos(angle)+dy*Math.sin(angle),grabY=-dx*Math.sin(angle)+dy*Math.cos(angle);
+    let surfaceGrab=null;
+    if(!state.outside) {
+      const side=hit.pageNumber%2===0?1:-1,amount=side<0?spread/(spreadCount()-1):1-spread/(spreadCount()-1);
+      const chain=resting(side,amount),width=128*208/180*(hit.item.type==='feather'?3:1);
+      let rx=0,ry=0;
+      for(let i=0;i<8;i++) {
+        const q=rigidInsertPoint(chain,side,hit.pageNumber,state,rx,ry,width),a=rigidInsertPoint(chain,side,hit.pageNumber,state,rx+1,ry,width),b=rigidInsertPoint(chain,side,hit.pageNumber,state,rx,ry+1,width);
+        const ax=a.x-q.x,ay=a.y-q.y,bx=b.x-q.x,by=b.y-q.y,det=ax*by-ay*bx;
+        if(Math.abs(det)<.001)break;
+        rx+=((p.x-q.x)*by-(p.y-q.y)*bx)/det;ry+=(ax*(p.y-q.y)-ay*(p.x-q.x))/det;
+      }
+      surfaceGrab={rx,ry};
+    }
+    itemDrag={item:hit.item,pageNumber:hit.pageNumber,startX:p.x,startY:p.y,x:hit.x,y:hit.y,
+      grabX,grabY,surfaceGrab,startRotation:angle,moved:false};
+    canvas.setPointerCapture(e.pointerId);canvas.style.cursor='grabbing';draw();return;
+  }
+  if(Math.abs(p.x-CX)<90)return;
+  const direction=p.x>CX?1:-1;
+  stopAuto();if(!begin(direction,true)||!motion)return;
+  drag={x:p.x,direction,moved:false};canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove',e=>{
+  if(itemDrag) {
+    const p=point(e),dx=p.x-itemDrag.startX,dy=p.y-itemDrag.startY;
+    if(Math.hypot(dx,dy)>5)itemDrag.moved=true;
+    // Translation must not invent a rotation based on which corner was
+    // grabbed. Preserve both the angle and the pointer's pickup offset.
+    const rotation=itemDrag.startRotation,cs=Math.cos(rotation),sn=Math.sin(rotation);
+    itemDrag.x=p.x-(itemDrag.grabX*cs-itemDrag.grabY*sn);
+    itemDrag.y=p.y-(itemDrag.grabX*sn+itemDrag.grabY*cs);
+    const state=itemState(itemDrag.item),center={x:itemDrag.x,y:itemDrag.y};state.rotation=rotation;
+    if(placeLooseItem(itemDrag.item,center,itemDrag.surfaceGrab?{...itemDrag.surfaceGrab,pointer:p}:null))itemDrag.pageNumber=state.pageNumber;
+    canvas.style.cursor='grabbing';draw();return;
+  }
+  if(!drag||!motion){
+    const p=point(e),toc=tocHitAreas.find(area=>p.x>=area.x&&p.x<=area.x+area.w&&p.y>=area.y&&p.y<=area.y+area.h);
+    const nextHighlight=toc?.row??-1;
+    if(nextHighlight!==highlightedToc){highlightedToc=nextHighlight;if(tocHitAreas.length)draw();}
+    canvas.style.cursor=(toc||itemHit(p))?'pointer':'grab';return;
+  }
+  const p=point(e),delta=(drag.x-p.x)*drag.direction;
+  if(Math.abs(delta)>5)drag.moved=true;
+  motion.progress=clamp(delta/640);draw();
+});
+canvas.addEventListener('pointerup',e=>{
+  if(itemDrag) {
+    const current=itemDrag, moved=current.moved;itemDrag=null;canvas.style.cursor='grab';
+    if(moved){refreshKeepsakes();draw();}
+    else openItem(current.item,itemState(current.item).back,current.pageNumber);
+    return;
+  }
+  if(!drag||!motion)return;
+  const commit=!drag.moved||motion.progress>.22;
+  drag=null;settle(commit);
+});
+canvas.addEventListener('pointercancel',()=>{
+  if(itemDrag){itemDrag=null;refreshKeepsakes();draw();return;}
+  if(drag&&motion){drag=null;settle(false);}
+});
+load();

@@ -1,0 +1,53 @@
+{
+  "name": "the-keepers-book",
+  "version": "1.0.11",
+  "private": true,
+  "description": "A local, editable keeper's book.",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis portable"
+  },
+  "devDependencies": {
+    "electron": "44.9.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.keepersbook.desktop",
+    "productName": "The Book",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "index.html",
+      "script.js",
+      "ink.js",
+      "style.css",
+      "main.cjs",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "The-Book-Setup-${version}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "The-Book-Portable-${version}.${ext}"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+BOOK ART — OCTOBER 18, 2026
+
+Generated with the built-in image-generation tool using the user's GIF frames
+as visual references. Images were generated with transparent backgrounds, then
+the isolated atlas parts were cropped into the versioned PNG files beside this
+document. The original reference captures were not used as finished game art.
+
+ATLAS 1: book-parts-v2.png
+Prompt specification: A transparent pixel-art game sprite atlas containing an
+open cover shell with dusty burgundy leather, dark plum/navy edges, small
+tarnished silver corner guards, muted rose cloth and diamond stitching; a
+horizontal golden paper-edge strip; a curved burgundy fore-edge strip; and
+three cream parchment tiles. Match the reference's restrained hand-painted
+pixel clusters, worn edges, pale clean paper centers and soft ochre stains.
+Avoid glossy gold, heavy black outlines around paper, sawtooth tears, glow,
+photorealism, text, watermarks and social-interface elements.
+Exports: book-frame-v2.png, page-stack-v2.png, leather-stack-v2.png,
+page-a-v2.png, page-b-v2.png, page-c-v2.png.
+
+ATLAS 2: cover-boards-v2.png
+Prompt specification: Four isolated matching book-board sprites in a 2-by-2
+transparent sheet. Upper left is a blank exterior front cover with a left
+hinge; upper right is a blank exterior back cover with a right hinge. Lower
+left is the front interior with dusty rose diamond-stitched cloth and a right
+binding; lower right is its mirrored back interior. Match Atlas 1's burgundy
+leather, plum shadows, worn pixel edges, silver guards and muted palette. All
+four boards are straight-on and unlettered, with no logos or ornaments, ready
+to be mapped onto moving cover geometry.
+Exports: front-cover-v2.png, back-cover-v2.png, inside-front-v2.png,
+inside-back-v2.png.
+
+KEEPSAKE: feather-keepsake.png
+Generated as a transparent, centered, gently curved russet/copper feather
+sprite with a dark quill and pixel-cluster texture. Used as the feather item in
+the same loose/taped, page-transfer, and inspection system as the paper passes.
