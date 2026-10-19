@@ -8,5 +8,6 @@
 *.md text eol=lf
 *.ps1 text eol=crlf
 *.png binary
+*.ico binary
 *.gif binary
 *.exe binary

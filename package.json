@@ -1,6 +1,6 @@
 {
   "name": "the-keepers-book",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "private": true,
   "description": "A local, editable keeper's book.",
   "main": "main.cjs",
@@ -27,6 +27,7 @@
       "assets/**/*"
     ],
     "win": {
+      "icon": "assets/buook-icon-v1.ico",
       "target": [
         {
           "target": "nsis",

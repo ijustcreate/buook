@@ -4,6 +4,8 @@ A local-first, editable pixel-art book for Windows, built with Electron and Canv
 
 The approved working checkpoint is **v1.0.11**. The desktop application currently appears as **The Book**; its application ID and save location are intentionally unchanged so existing books keep working.
 
+The current development version is **v1.0.12**, adding correct first-leaf stack thickness, golden paper edges on both stack faces, and a custom generated desktop icon. The `v1.0.11` checkpoint is preserved unchanged.
+
 ## Inspiration and credit
 
 **buook is inspired by the interactive Book of Grudges in [Grudgekeeper](https://cartooncyb.org/), the dwarf RPG created by Jae / Cartoon Cyborg.** The book's tactile page turns, layered paper, and small keepsakes were the starting point for this project.
@@ -70,12 +72,13 @@ The scripts in `scripts/` require a resolvable `playwright` package with Electro
 node scripts/verify-insert-pickup.cjs
 node scripts/verify-insert-transfer.cjs
 node scripts/verify-edge-alpha.cjs
+node scripts/verify-stack-edges.cjs
 node scripts/verify-book-layers.cjs
 ```
 
 Set `BOOK_ASSERT_PICKUP=1` for first-frame pixel assertions. Set `BOOK_QA_EXE` to a packaged executable to check that build instead of the development app. `BOOK_VISIBILITY_STEPS` controls the insert suite's pixel-sampling density.
 
-The checks cover actual first-frame photo visibility, opaque back-face occlusion, facing-page and inside-cover ownership, taped-face anchoring, dragging, multiple inserts, transparent paper edges, page-stack geometry, palettes, and shelf reloads.
+The checks cover actual first-frame photo visibility, opaque back-face occlusion, facing-page and inside-cover ownership, taped-face anchoring, dragging, multiple inserts, transparent paper edges, first/second-leaf stacks, matching paper-edge materials and joins, palettes, and shelf reloads.
 
 ## Project notes
 

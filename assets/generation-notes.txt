@@ -1,5 +1,14 @@
 BOOK ART — OCTOBER 18, 2026
 
+LAUNCHER ICON — OCTOBER 19, 2026
+buook-icon-v1.png was generated with the built-in image-generation tool on a
+transparent background: a single forest-green/teal pixel-art leather book with
+gold hardware and a botanical ornament. See buook-icon-prompt.txt for the full
+prompt. scripts/build-icon.ps1 deterministically exports seven PNG-backed ICO
+sizes, from 16px to 256px, preserving alpha and square pixel clusters. The icon
+is used for the application window, Windows executable, installer, and desktop
+shortcut. It is not an original Grudgekeeper asset or logo.
+
 Generated with the built-in image-generation tool using the user's GIF frames
 as visual references. Images were generated with transparent backgrounds, then
 the isolated atlas parts were cropped into the versioned PNG files beside this

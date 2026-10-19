@@ -243,6 +243,31 @@ function coverContent(edge) {
   return bookContent.covers[edge]||(bookContent.covers[edge]={});
 }
 
+const paperSheets=new Map(),paperBottoms=new WeakMap();
+function paperSurface(number) {
+  const key=((number%6)+6)%6;
+  if(paperSheets.has(key))return paperSheets.get(key);
+  const surface=document.createElement('canvas');surface.width=PAGE_W;surface.height=PAGE_H;
+  const p=surface.getContext('2d');p.imageSmoothingEnabled=false;
+  p.fillStyle='#f6e9b5';p.fillRect(number%2!==0?16:0,12,PAGE_W-16,PAGE_H-24);
+  const tile=assets[['a','b','c'][((number%3)+3)%3]];
+  p.save();if(number%2===0){p.translate(PAGE_W,0);p.scale(-1,1);}
+  p.drawImage(tile,5,8,tile.width-28,tile.height-16,0,0,PAGE_W,PAGE_H);p.restore();
+  paperSheets.set(key,surface);return surface;
+}
+function paperBottomV(number,side,u) {
+  const surface=paperSurface(number);
+  if(!paperBottoms.has(surface)) {
+    const pixels=surface.getContext('2d').getImageData(0,0,PAGE_W,PAGE_H).data,profile=[];
+    for(let x=0;x<PAGE_W;x++) {
+      let y=PAGE_H-1;while(y>=0&&pixels[(y*PAGE_W+x)*4+3]<180)y--;
+      profile[x]=(y>=0?y+1:PAGE_H-12)/PAGE_H;
+    }
+    paperBottoms.set(surface,profile);
+  }
+  const column=Math.round(clamp(side<0?1-u:u)*(PAGE_W-1));
+  return paperBottoms.get(surface)[column];
+}
 function viewport(number) {
   const blank = $('#blank').checked;
   const hand=$('#hand').value;
@@ -255,13 +280,7 @@ function viewport(number) {
   p.imageSmoothingEnabled = false;
   // The binding edge is straight and continuous; only the three exposed
   // parchment edges retain the tile's torn silhouette.
-  p.fillStyle='#f6e9b5';
-  p.fillRect(number%2===1?16:0,12,PAGE_W-16,PAGE_H-24);
-  const tile=assets[['a','b','c'][number%3]];
-  // Both outer edges remain soft. Mirror the tile so its darker edge is
-  // consistently tucked into the binding on either side of the spread.
-  p.save();if(number%2===0){p.translate(PAGE_W,0);p.scale(-1,1);}
-  p.drawImage(tile,5,8,tile.width-28,tile.height-16,0,0,PAGE_W,PAGE_H);p.restore();
+  p.drawImage(paperSurface(number),0,0);
   const paperTints={ivory:'rgba(255,247,218,.12)',aged:'rgba(202,147,82,.13)'};
   if(paperTints[custom.paper]){p.save();p.globalCompositeOperation='source-atop';p.fillStyle=paperTints[custom.paper];p.fillRect(0,0,PAGE_W,PAGE_H);p.restore();}
   if(!blank) {
@@ -411,7 +430,12 @@ function litViewport(number,chain,side,turnShade=0) {
 
 const pageElevation=z=>z*1.7/(1+Math.max(0,z)/145);
 const elevationZ=e=>145*e/(246.5-e);
-const pageBlockDepth=amount=>(3+31*clamp(amount))*pageThickness();
+const pageBlockDepth=amount=>{
+  const leaves=pageCount/2;
+  // The displayed top leaf is not a stack beneath itself. One landed leaf
+  // has no underlying block; the second leaf introduces the first layer.
+  return 34*clamp((clamp(amount)*leaves-1)/(leaves-1))*pageThickness();
+};
 const layerDepth=(amount,u)=>pageBlockDepth(amount)*mix(.22,1,smooth(u/.24));
 
 // One cubic profile controls both the leaf and the block underneath it. The
@@ -634,21 +658,23 @@ function mesh(chain,texture,side,extraShade=0,backTexture=null) {
   ctx.restore();
 }
 
-function stacks(chain,side,amount) {
+function stacks(chain,side,amount,number=side>0?0:1) {
   const load=clamp(amount),depth=pageBlockDepth(load),state=bookState();
+  if(depth<.0001)return;
   const foreEdge=side*(depth*.30+Math.max(0,side*(state.coverShift-state.shift)));
+  const upper=(p,v)=>project(p,v*paperBottomV(number,side,p.u));
   const lower=(p,v)=>{
-    const point=project(p,v),perspective=pagePerspective(v);
+    const edgeV=v*paperBottomV(number,side,p.u),point=upper(p,v),perspective=pagePerspective(edgeV);
     return {x:point.x+foreEdge*p.u*perspective.scale,y:point.y+layerDepth(load,p.u)*mix(.55,1,perspective.vertical)};
   };
   // Surface leaves are contained inside the common block, not painted across
   // its front face. All layers use the same projected depth and outer corner.
-  const leafCount=Math.max(1,Math.round(1+load*4));
+  const leafCount=Math.min(5,Math.ceil(Math.max(0,load*pageCount/2-1)));
   for(let k=leafCount;k>=1;k--) {
     const fraction=k/(leafCount+1);
     const under=chain.map(p=>({...p,x:p.x+foreEdge*fraction*p.u,
       z:elevationZ(pageElevation(p.z)-layerDepth(load,p.u)*fraction)}));
-    mesh(under,assets[['a','b','c'][k%3]],side,.05);
+    mesh(under,paperSurface(number+side*2*k),side,.05);
   }
   // The vertical fore-edge and bottom ribbon meet at the exact same point.
   // Keep the strip's painted curl out of its UV range; the spline supplies
@@ -657,14 +683,14 @@ function stacks(chain,side,amount) {
   for(let row=0;row<6;row++){
     const v0=row/6,v1=(row+1)/6,u0=mix(8,assets.stack.width-8,v0),u1=mix(8,assets.stack.width-8,v1);
     quad(assets.stack,[{x:u0,y:8},{x:u1,y:8},{x:u1,y:assets.stack.height-8},{x:u0,y:assets.stack.height-8}],
-      [project(edge,v0),project(edge,v1),lower(edge,v1),lower(edge,v0)]);
+      [upper(edge,v0),upper(edge,v1),lower(edge,v1),lower(edge,v0)]);
   }
   for(let i=0;i<SEGMENTS;i++) {
-    const a=chain[i],b=chain[i+1],pa=project(a,1),pb=project(b,1);
+    const a=chain[i],b=chain[i+1],pa=upper(a,1),pb=upper(b,1);
     const lowerA=lower(a,1),lowerB=lower(b,1);
-    const u0=(.26+a.u*.55)*assets.leather.width,u1=(.26+b.u*.55)*assets.leather.width;
-    ctx.fillStyle='#622e38';path([pa,pb,lowerB,lowerA]);ctx.fill();
-    quad(assets.leather,[{x:u0,y:8},{x:u1,y:8},{x:u1,y:assets.leather.height-8},{x:u0,y:assets.leather.height-8}],
+    const u0=mix(8,assets.stack.width-8,a.u),u1=mix(8,assets.stack.width-8,b.u);
+    ctx.fillStyle='#ad7d3d';path([pa,pb,lowerB,lowerA]);ctx.fill();
+    quad(assets.stack,[{x:u0,y:8},{x:u1,y:8},{x:u1,y:assets.stack.height-8},{x:u0,y:assets.stack.height-8}],
       [pa,pb,lowerB,lowerA]);
   }
 }
@@ -728,8 +754,8 @@ function draw() {
   if(rightNumber>=pageCount)drawInside(1);
   if(leftNumber<0)restingItems(resting(-1,1),-1,-1,'over');
   if(rightNumber>=pageCount)restingItems(resting(1,1),pageCount,1,'over');
-  if(leftNumber>=0)stacks(left,-1,clamp(fractional/(spreadCount()-1)));
-  if(rightNumber<pageCount)stacks(right,1,clamp(1-fractional/(spreadCount()-1)));
+  if(leftNumber>=0)stacks(left,-1,clamp(fractional/(spreadCount()-1)),leftNumber);
+  if(rightNumber<pageCount)stacks(right,1,clamp(1-fractional/(spreadCount()-1)),rightNumber);
   if(leftNumber>=0){restingItems(left,leftNumber,-1,'under');mesh(left,litViewport(leftNumber,left,-1),-1);registerTocAreas(leftNumber,left,-1);restingItems(left,leftNumber,-1,'over');}
   if(rightNumber<pageCount){restingItems(right,rightNumber,1,'under');mesh(right,litViewport(rightNumber,right,1),1);registerTocAreas(rightNumber,right,1);restingItems(right,rightNumber,1,'over');}
   if(motion) {

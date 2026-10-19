@@ -57,6 +57,7 @@ async function registerBookProtocol() {
 function createWindow() {
   const window = new BrowserWindow({
     title: 'The Book',
+    icon: path.join(__dirname, 'assets', 'buook-icon-v1.png'),
     width: 1180,
     height: 900,
     minWidth: 720,

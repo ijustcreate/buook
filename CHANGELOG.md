@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.12 — 2026-10-19
+
+- Removed the phantom underlying stack beneath the first landed leaf on either side; underlying layers begin with the second leaf.
+- Aligned stack ribbons to the actual parchment silhouette and made underlying sheets use the same crop as the visible page.
+- Replaced the reddish leather texture on bottom page edges with the same golden parchment-edge texture used on the side.
+- Added a generated transparent forest-green/gold pixel-art launcher icon, seven Windows ICO sizes, and application/installer icon configuration.
+- Added focused stack-count, material, corner-join, and bottom-seam checks.
+
 ## 1.0.11 — 2026-10-19
 
 Approved working baseline for the initial `buook` repository and version tag.
