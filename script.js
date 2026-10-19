@@ -34,6 +34,7 @@ let spread = 0, motion = null, raf = 0, drag = null, autoTimer = 0;
 let loaded = false, autoDirection = 1;
 let closedEdge=null,coverMotion=null,closedFlipMotion=null;
 let spineView=false,spineMotion=null;
+let bookTableMode=false;
 let queuedTurns=[];
 let tocHitAreas=[],highlightedToc=-1,jumpTimer=0;
 const PIXEL_SCALE=.64;
@@ -728,6 +729,7 @@ function draw() {
   tocHitAreas=[];
   turningSheetDepth=null;
   ctx.clearRect(0,0,W,H);ctx.imageSmoothingEnabled=false;
+  if(closed3DActive()){drawClosed3D();return;}
   if(spineView&&!spineMotion){drawSpineView();return;}
   ctx.save();ctx.fillStyle='rgba(0,0,0,.45)';
   ctx.shadowColor='rgba(0,0,0,.7)';ctx.shadowBlur=12;
@@ -829,11 +831,11 @@ function opaqueBounds(source) {
   const bounds={left,top,right:right+1,bottom:bottom+1};opaqueBoundsCache.set(source,bounds);return bounds;
 }
 
-function titledSpine() {
-  const title=bookName.trim()||'Untitled book';
-  if(spineTitleCache?.source===assets.spine&&spineTitleCache.title===title)return spineTitleCache.texture;
-  const texture=spriteSurface(260,assets.spine.height),p=texture.getContext('2d');
-  p.imageSmoothingEnabled=false;p.drawImage(assets.spine,380,0,260,assets.spine.height,0,0,260,texture.height);
+function titledSpine(source=assets.spine,name=bookName,palette=bookContent.palette) {
+  const title=name.trim()||'Untitled book';
+  if(spineTitleCache?.source===source&&spineTitleCache.title===title)return spineTitleCache.texture;
+  const texture=spriteSurface(260,source.height),p=texture.getContext('2d');
+  p.imageSmoothingEnabled=false;p.drawImage(source,380,0,260,source.height,0,0,260,texture.height);
   const original=spriteSurface(texture.width,texture.height);original.getContext('2d').drawImage(texture,0,0);
   // Retain the two end bands. Rebuild the entire middle as one continuous
   // leather panel, removing the two internal raised bands and old dividers.
@@ -843,7 +845,7 @@ function titledSpine() {
   p.beginPath();p.rect(47,300,166,890);p.clip();
   for(let y=300;y<1190;y+=96)for(let x=47;x<213;x+=82)p.drawImage(original,94,95,82,96,x,y,82,96);
   p.restore();
-  p.strokeStyle=metalInk();p.globalAlpha=.50;p.lineWidth=3;
+  p.strokeStyle=palette.metal==='silver'?'#dce6ee':'#f0cd82';p.globalAlpha=.50;p.lineWidth=3;
   p.beginPath();p.moveTo(43,317);p.lineTo(43,1173);p.moveTo(217,317);p.lineTo(217,1173);p.stroke();p.globalAlpha=1;
   // Extract the existing emblem with its dark pixel outline. The surrounding
   // leather remains transparent, so it can be moved to both end panels.
@@ -862,9 +864,9 @@ function titledSpine() {
   p.save();p.translate(130,745);p.rotate(-Math.PI/2);p.textAlign='center';p.textBaseline='middle';
   let size=110;
   do {p.font=`bold ${size}px Georgia`;if(p.measureText(title).width<=800)break;size--;}while(size>18);
-  p.strokeStyle=coverInk(.24);p.lineWidth=4;p.lineJoin='round';p.fillStyle=metalInk();
+  p.strokeStyle=coverInk(.24,palette.outside);p.lineWidth=4;p.lineJoin='round';p.fillStyle=palette.metal==='silver'?'#dce6ee':'#f0cd82';
   p.strokeText(title,0,0,800);p.fillText(title,0,0,800);
-  p.restore();spineTitleCache={source:assets.spine,title,texture};return texture;
+  p.restore();spineTitleCache={source,title,texture};return texture;
 }
 
 function drawSpineView() {
@@ -1008,8 +1010,7 @@ function bilerp(points,u,v) {
 }
 
 function metalInk(){return bookContent.palette.metal==='silver'?'#dce6ee':'#f0cd82';}
-function coverInk(shade=1) {
-  const color=bookContent.palette.outside;
+function coverInk(shade=1,color=bookContent.palette.outside) {
   return `rgb(${[1,3,5].map(index=>Math.round(clamp(parseInt(color.slice(index,index+2),16)*shade,0,255))).join(',')})`;
 }
 
@@ -1059,6 +1060,10 @@ function animateCover(edge,closing) {
 
 function flipClosedBook() {
   if(!closedEdge||coverMotion||closedFlipMotion||spineView||spineMotion)return false;
+  if(closed3DActive()){
+    closedEdge=closedEdge==='front'?'back':'front';spread=closedEdge==='front'?0:spreadCount()-1;
+    updateControls();draw();return true;
+  }
   const from=closedEdge,to=from==='front'?'back':'front',start=performance.now(),duration=460;
   closedFlipMotion={from,to,progress:0};updateControls();
   const frame=now=>{
@@ -1488,6 +1493,7 @@ function saveBook(copy=false){
 }
 function openSavedBook(id){
   const book=savedBooks.find(entry=>entry.id===id);if(!book)return;
+  bookTableMode=false;
   bookName=book.name;bookContent.name=book.name;bookContent.pageCount=book.pageCount;pageCount=book.pageCount;
   bookContent.pages=structuredClone(book.pages||{});bookContent.covers={front:{},back:{},...(book.covers||{})};bookContent.palette={outside:'#9b382d',inside:'#c85e68',metal:'gold',...(book.palette||{})};activeBookId=id;localStorage.setItem('keepers-book-active',id);
   $('#book-name').value=bookName;$('#outside-color').value=bookContent.palette.outside;$('#inside-color').value=bookContent.palette.inside;$('#metal-color').value=bookContent.palette.metal;
@@ -1561,21 +1567,22 @@ function initSymbolPicker() {
 }
 
 function updateControls() {
-  $('#pagination').textContent=closedEdge?`${closedEdge.toUpperCase()} COVER`:spread===0?'INSIDE FRONT — 1':spread===spreadCount()-1?`${pageCount} — INSIDE BACK`:`${spread*2} — ${Math.min(spread*2+1,pageCount)} / ${pageCount}`;
+  update3DControls();
+  $('#pagination').textContent=bookTableMode?'3D BOOK TABLE':closedEdge?`${closedEdge.toUpperCase()} COVER`:spread===0?'INSIDE FRONT — 1':spread===spreadCount()-1?`${pageCount} — INSIDE BACK`:`${spread*2} — ${Math.min(spread*2+1,pageCount)} / ${pageCount}`;
   $('#position').value=spread;
   $('#position').max=spreadCount()-1;
   $('#page-count').value=pageCount;
-  const viewLocked=spineView||!!spineMotion||!!closedFlipMotion;
+  const viewLocked=bookTableMode||spineView||!!spineMotion||!!closedFlipMotion;
   $('#previous').disabled=viewLocked||!!motion||!!coverMotion||closedEdge==='front';
   $('#next').disabled=viewLocked||!!motion||!!coverMotion||closedEdge==='back';
   $('#previous').setAttribute('aria-label',closedEdge==='back'?'Open back cover':spread===0?'Close front cover':'Previous spread');
   $('#next').setAttribute('aria-label',closedEdge==='front'?'Open front cover':spread===spreadCount()-1?'Close back cover':'Next spread');
-  $('#close-book').hidden=!!closedEdge||!!motion||!!coverMotion||(spread!==0&&spread!==spreadCount()-1);
-  $('#flip-closed').hidden=!closedEdge||!!coverMotion||!!closedFlipMotion||spineView||!!spineMotion;
+  $('#close-book').hidden=bookTableMode||!!closedEdge||!!motion||!!coverMotion||(spread!==0&&spread!==spreadCount()-1);
+  $('#flip-closed').hidden=bookTableMode||!closedEdge||!!coverMotion||!!closedFlipMotion||spineView||!!spineMotion;
   $('#flip-closed').textContent=closedEdge==='front'?'Flip to back cover':'Flip to front cover';
   $('#spine-view').textContent=spineView?'Return to book':'View spine';
   $('#spine-view').setAttribute('aria-pressed',String(spineView));
-  $('#spine-view').disabled=!!motion||!!coverMotion||!!closedFlipMotion||!!spineMotion||!!inspection;
+  $('#spine-view').disabled=bookTableMode||!!motion||!!coverMotion||!!closedFlipMotion||!!spineMotion||!!inspection;
   refreshContentEditor();
   refreshKeepsakes();
 }
@@ -1836,4 +1843,105 @@ canvas.addEventListener('pointercancel',()=>{
   if(itemDrag){itemDrag=null;refreshKeepsakes();draw();return;}
   if(drag&&motion){drag=null;settle(false);}
 });
+// Closed models are isolated from the turning-sheet mesh and insert ownership.
+const closedMaterialCache=new Map();
+let closedSceneKey='';
+let closedSceneSyncing=false;
+const current3DBook=()=>({...bookContent,id:activeBookId||'current-unsaved',name:bookName,pageCount});
+function closed3DActive(){return loaded&&!coverMotion&&!closedFlipMotion&&!spineMotion&&(bookTableMode||!!closedEdge||spineView);}
+function closedMaterials(book) {
+  const palette={outside:'#9b382d',inside:'#c85e68',metal:'gold',...book.palette};
+  const key=JSON.stringify([book.name,palette,book.covers]);
+  if(closedMaterialCache.has(key))return closedMaterialCache.get(key);
+  const outside=tintCoverSprite(baseAssets.front,'outside',palette);
+  const symbols=tintCoverSprite(baseAssets.symbols,'symbols',palette);
+  const makeCover=edge=>{
+    const source=edge==='front'?outside:mirroredSprite(outside),bounds=opaqueBounds(source);
+    const surface=spriteSurface(400,565),p=surface.getContext('2d');p.imageSmoothingEnabled=false;
+    p.drawImage(source,bounds.left,bounds.top,bounds.right-bounds.left,bounds.bottom-bounds.top,0,0,400,565);
+    const cover=book.covers?.[edge]||{},title=String(cover.title||'').trim();
+    const placement=cover.placement||'center',v=placement==='top'?.25:placement==='bottom'?.76:.46;
+    if(Number.isInteger(cover.symbol)&&cover.symbol>=0&&cover.symbol<36){
+      const cell=symbols.width/6,pad=cell*.045,index=cover.symbol;
+      p.drawImage(symbols,(index%6)*cell+pad,Math.floor(index/6)*cell+pad,cell-pad*2,cell-pad*2,136,title?(placement==='center'?379:266):192,128,141);
+    }
+    if(title){let size=34;p.textAlign='center';p.textBaseline='middle';const family={serif:'Georgia',pixel:'monospace',script:'cursive'}[cover.font]||'Georgia';
+      do{p.font=`${size}px ${family}`;if(p.measureText(title).width<320)break;size--;}while(size>10);
+      p.strokeStyle='#301c19';p.lineWidth=3;p.strokeText(title,200,v*565);p.fillStyle=palette.metal==='silver'?'#dce6ee':'#f0cd82';p.fillText(title,200,v*565);
+    }return surface;
+  };
+  const spine=titledSpine(tintCoverSprite(baseAssets.spine,'spine',palette),book.name||'Untitled book',palette);
+  const bounds=opaqueBounds(assets.stack);
+  const result={front:makeCover('front'),back:makeCover('back'),spine,paper:assets.stack,leather:coverInk(.6,palette.outside),
+    paperUV:{x:bounds.left+18,y:bounds.top+3,w:bounds.right-bounds.left-36,h:bounds.bottom-bounds.top-6}};
+  if(closedMaterialCache.size>24)closedMaterialCache.delete(closedMaterialCache.keys().next().value);
+  closedMaterialCache.set(key,result);return result;
+}
+const closedBooks3D=new ClosedBooks3D({canvas,context:ctx,materials:closedMaterials,changed:()=>{if(!closedSceneSyncing){draw();update3DControls();}},open:()=>open3DBook()});
+function drawClosed3D() {
+  const current=current3DBook(),books=bookTableMode?[current,...savedBooks.filter(book=>book.id!==current.id)]:[current];
+  const key=JSON.stringify([bookTableMode,spineView,closedEdge,books.map(book=>[book.id,book.pageCount])]);
+  if(key!==closedSceneKey){
+    closedSceneKey=key;closedSceneSyncing=true;
+    try{closedBooks3D.setBooks(books,bookTableMode,current.id);}finally{closedSceneSyncing=false;}
+    if(closedEdge==='back'&&!bookTableMode)closedBooks3D.pitch=-1.05;
+    if(spineView&&!bookTableMode)closedBooks3D.yaw=-1.15;
+  }
+  for(const model of closedBooks3D.models)model.book=books.find(book=>book.id===model.id)||model.book;
+  itemHits=[];closedBooks3D.draw();
+}
+function update3DControls() {
+  const active=closed3DActive();$('#book-3d-controls').hidden=!active;
+  $('#book-table').disabled=!!motion||!!coverMotion||!!spineMotion||!!closedFlipMotion;
+  $('#book-table').textContent=bookTableMode?'Return to open book':'3D book table';
+  if(!active)return;
+  for(const id of ['move','turn-left','turn-right','stack','spread','copy'])$('#book-3d-'+id).hidden=!bookTableMode;
+  $('#book-3d-orbit').setAttribute('aria-pressed',String(closedBooks3D.mode==='orbit'));
+  $('#book-3d-move').setAttribute('aria-pressed',String(closedBooks3D.mode==='move'));
+  const selected=closedBooks3D.selected?.book?.name||bookName;
+  $('#book-3d-help').textContent=bookTableMode?`${selected} · ${closedBooks3D.mode==='move'?'Drag a book onto another to stack; drag away to separate.':'Drag to orbit; click a book to select.'} Scroll to zoom.`:'Drag to spin the closed book · scroll to zoom · double-click to open';
+}
+function open3DBook() {
+  const selected=closedBooks3D.selected,wasTable=bookTableMode;
+  bookTableMode=false;closedBooks3D.gesture=null;
+  if(wasTable&&selected&&selected.id!==(activeBookId||'current-unsaved')){spineView=false;openSavedBook(selected.id);return;}
+  const edge=closedEdge||'front';spineView=false;closedEdge=edge;spread=edge==='front'?0:spreadCount()-1;
+  animateCover(edge,false);
+}
+function toggleBookTable(){
+  if(motion||coverMotion||spineMotion||closedFlipMotion)return;
+  stopAuto();bookTableMode=!bookTableMode;spineView=false;closedEdge=null;closedSceneKey='';
+  $('#shelf').close();updateControls();draw();update3DControls();
+}
+$('#book-table').onclick=$('#shelf-table').onclick=toggleBookTable;
+$('#book-3d-open').onclick=open3DBook;
+$('#book-3d-orbit').onclick=()=>{closedBooks3D.mode='orbit';update3DControls();};
+$('#book-3d-move').onclick=()=>{closedBooks3D.mode='move';update3DControls();};
+$('#book-3d-reset').onclick=()=>closedBooks3D.reset(closedEdge==='back'&&!bookTableMode);
+$('#book-3d-turn-left').onclick=()=>closedBooks3D.rotateBook(-Math.PI/12);
+$('#book-3d-turn-right').onclick=()=>closedBooks3D.rotateBook(Math.PI/12);
+$('#book-3d-stack').onclick=()=>closedBooks3D.arrange(true);
+$('#book-3d-spread').onclick=()=>closedBooks3D.arrange(false);
+$('#book-3d-copy').onclick=()=>{saveBook(true);closedSceneKey='';draw();update3DControls();};
+for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])canvas.addEventListener(type,event=>{
+  if(!closed3DActive())return;
+  event.stopImmediatePropagation();event.preventDefault();
+  if(type==='pointerdown'){if(event.button!==0)return;closedBooks3D.pointerDown(point(event));canvas.setPointerCapture(event.pointerId);}
+  else if(type==='pointermove')closedBooks3D.pointerMove(point(event));
+  else {closedBooks3D.pointerUp(type==='pointercancel');if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);}
+},true);
+canvas.addEventListener('wheel',event=>{if(closed3DActive()){event.preventDefault();closedBooks3D.zoom(event.deltaY);}},{passive:false});
+canvas.addEventListener('dblclick',event=>{if(closed3DActive()){event.preventDefault();open3DBook();}});
+document.addEventListener('keydown',event=>{
+  if(!closed3DActive()||['INPUT','TEXTAREA','SELECT','BUTTON'].includes(event.target.tagName)||$('#shelf').open)return;
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter','+','-','q','e'].includes(event.key)){
+    event.preventDefault();event.stopImmediatePropagation();
+    if(event.key==='Enter')return open3DBook();
+    if(event.key==='q'||event.key==='e')closedBooks3D.rotateBook(event.key==='q'?-.15:.15);
+    else if(event.key==='+'||event.key==='-')closedBooks3D.zoom(event.key==='+'?-100:100);
+    else {if(event.key==='ArrowLeft')closedBooks3D.yaw-=.15;if(event.key==='ArrowRight')closedBooks3D.yaw+=.15;
+      if(event.key==='ArrowUp')closedBooks3D.pitch=Math.min(1.48,closedBooks3D.pitch+.12);
+      if(event.key==='ArrowDown')closedBooks3D.pitch=Math.max(bookTableMode?.14:-1.48,closedBooks3D.pitch-.12);draw();}
+  }
+},true);
 load();

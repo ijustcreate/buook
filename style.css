@@ -26,6 +26,14 @@ output { font:12px monospace; min-width:126px; text-align:center; letter-spacing
 .close-book[hidden] { display:none; }
 #spine-view[aria-pressed=true] { color:#f0d39c; border-bottom:1px solid #ae8553; }
 .hint { text-align:center; color:#746e62; font:10px/1.5 monospace; margin:10px 0 11px; }
+.book-3d-controls { max-width:820px; margin:8px auto 0; text-align:center; }
+.book-3d-controls[hidden] { display:none; }
+.three-d-actions { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; }
+.three-d-actions button { padding:6px 9px; font-size:10px; }
+.three-d-actions [aria-pressed=true] { color:#ffe1a5; border-color:#ba9760; background:#303029; }
+#book-3d-help { color:#c1ac83; font:11px/1.5 monospace; margin:8px 0 0; }
+main:has(#book-3d-controls:not([hidden])) .book-stage { width:min(100%,calc((100svh - 305px)*1.47)); }
+main:has(#book-3d-controls:not([hidden])) .hint { display:none; }
 .options { display:flex; flex-wrap:wrap; justify-content:center; gap:18px; align-items:center; color:#8f8879; font:11px monospace; }
 .options label { display:flex; align-items:center; gap:9px; }
 .options select { padding:6px; font-size:11px; }

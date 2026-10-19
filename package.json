@@ -1,6 +1,6 @@
 {
-  "name": "the-keepers-book",
-  "version": "1.0.13",
+  "name": "pixel-book",
+  "version": "1.0.14",
   "private": true,
   "description": "A local, editable keeper's book.",
   "main": "main.cjs",
@@ -24,6 +24,7 @@
       "index.html",
       "script.js",
       "ink.js",
+      "closed-books-3d.js",
       "style.css",
       "main.cjs",
       "assets/**/*"

@@ -1,20 +1,20 @@
-# buook
+# Pixel Book
 
 A local-first, editable pixel-art book for Windows, built with Electron and Canvas. Worn parchment, curved page stacks, customizable covers, a spine-view shelf, and loose or taped keepsakes.
 
 ## Play in your browser
 
-[**Open buook — public web app**](https://buook.felix13.chatgpt.site)
+[**Open Pixel Book — public web app**](https://buook.felix13.chatgpt.site)
 
 No installation or account is required. The browser version uses the same book renderer and editing tools as the desktop app. Your shelf is saved **in your current browser on this device**, not on a public server. Desktop and browser shelves are separate; clearing browser data removes that browser’s saved books. Keep the same web address to return to the same shelf.
 
-The approved working checkpoint is **v1.0.11**. The desktop application currently appears as **The Book**; its application ID and save location are intentionally unchanged so existing books keep working.
+The approved working checkpoint is **v1.0.11**. The app displays **Pixel Book**; Windows installers/executables retain their legacy **The Book** identifier. The application ID and save location are intentionally unchanged so existing books keep working.
 
-The current development version is **v1.0.13**, adding correct first-leaf stack thickness, golden paper edges on both stack faces, a custom generated desktop icon, and closed views with two covers and a parallel paper block. The `v1.0.11` checkpoint is preserved unchanged.
+The current development version is **v1.0.14**, adding rotatable 3D closed books and a persistent book-stacking table while keeping the open-book page turns. The `v1.0.11` checkpoint is preserved unchanged. The project was originally called `buook`; the existing web address and desktop profile are retained to preserve saved books.
 
 ## Inspiration and credit
 
-**buook is inspired by the interactive Book of Grudges in [Grudgekeeper](https://cartooncyb.org/), the dwarf RPG created by Jae / Cartoon Cyborg.** The book's tactile page turns, layered paper, and small keepsakes were the starting point for this project.
+**Pixel Book is inspired by the interactive Book of Grudges in [Grudgekeeper](https://cartooncyb.org/), the dwarf RPG created by Jae / Cartoon Cyborg.** The book's tactile page turns, layered paper, and small keepsakes were the starting point for this project.
 
 Watch the creator's [Grudgekeeper Dev Log #1 — I'm building a 6-path RPG by myself. Here's everything so far.](https://www.youtube.com/watch?v=W3H2AYEvl94).
 
@@ -22,7 +22,7 @@ This is an independent project, not an official Grudgekeeper product or an endor
 
 ## Download
 
-See [Releases](https://github.com/ijustcreate/buook/releases) for Windows x64 packages:
+See [Releases](https://github.com/ijustcreate/pixel-book/releases) for Windows x64 packages:
 
 - `The-Book-Setup-1.0.11.exe` — installer.
 - `The-Book-Portable-1.0.11.exe` — runs without installing.
@@ -36,6 +36,14 @@ These are unsigned Windows builds. Windows may show a publisher/reputation warni
 - Customizable outside/inside cover colors, gold or silver hardware, cover text/symbols, and titled spines.
 - A locally saved shelf, including a separate save-copy action.
 - Inspectable, draggable loose inserts and taped keepsakes.
+- Closed books with physical front/back boards, spine, and inset paper faces in a shared perspective camera.
+- A 3D table for arranging saved books into stacks, with per-book rotation and browser-local layout persistence.
+
+### Closed-book controls
+
+Close a book or choose **View spine**, then drag to rotate it freely. Scroll to zoom; double-click or choose **Open selected book** to return to the original animated pages. Arrow keys orbit; Enter opens; +/− zoom.
+
+Choose **3D book table** (also available as **Arrange in 3D** on the shelf) to arrange the current book and saved shelf books. **Rotate view** orbits the camera. **Move books** lets you drag a selected book onto another to stack, or away to separate. The ↶/↷ Book buttons (or Q/E) rotate the selected book on the table. **Stack all**, **Spread out**, and **Reset view** offer quick arrangements. **Add current copy** saves an actual copy to your shelf, not a temporary demo object. Table positions and rotations survive reloads. Stacks snap into place and settle when a support is removed; this is not a rigid-body physics sandbox.
 
 ### How inserts behave
 
@@ -90,6 +98,7 @@ node scripts/verify-edge-alpha.cjs
 node scripts/verify-stack-edges.cjs
 node scripts/verify-book-layers.cjs
 node scripts/verify-web.cjs http://127.0.0.1:4174/
+node scripts/verify-closed-3d.cjs http://127.0.0.1:4174/
 ```
 
 Set `BOOK_ASSERT_PICKUP=1` for first-frame pixel assertions. Set `BOOK_QA_EXE` to a packaged executable to check that build instead of the development app. `BOOK_VISIBILITY_STEPS` controls the insert suite's pixel-sampling density.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.14 — 2026-10-19
+
+- Renamed the visible project and public GitHub repository to Pixel Book; retained the existing site origin, application ID and save profile.
+- Added perspective 3D closed books with separate boards, spine and inset natural-gold paper surfaces, back-face culling, textured faces, lighting and contact shadows.
+- Added pointer orbit, zoom, keyboard controls, per-book rotation and selection, and opening the selected saved book in the existing animated renderer.
+- Added a 3D book table with drag-to-stack, automatic support settling, stack/spread actions and locally persisted layouts.
+- Kept open-book page meshes and loose/taped insert transfer rules unchanged.
+
 ## 1.0.13 — 2026-10-19
 
 - Added the opposite board beneath the closed book’s page block for both front and back views.

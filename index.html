@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>The Book</title>
-  <meta name="description" content="buook — an editable pixel-art keeper’s book with turning pages and a locally saved shelf.">
+  <title>Pixel Book</title>
+  <meta name="description" content="Pixel Book — editable pixel-art books with turning pages, a 3D book table and a locally saved shelf.">
   <link rel="icon" type="image/png" href="assets/buook-icon-v1.png">
-  <link rel="stylesheet" href="style.css?v=22">
+  <link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
   <main>
@@ -24,6 +24,21 @@
     <button id="flip-closed" class="close-book" hidden>Flip to back cover</button>
     <button id="spine-view" class="close-book">View spine</button>
     <button id="shelf-open" class="close-book">My shelf</button>
+    <button id="book-table" class="close-book">3D book table</button>
+    <section id="book-3d-controls" class="book-3d-controls" aria-label="Closed book 3D controls" hidden>
+      <div class="three-d-actions">
+        <button id="book-3d-orbit" aria-pressed="true">Rotate view</button>
+        <button id="book-3d-move" aria-pressed="false">Move books</button>
+        <button id="book-3d-turn-left" aria-label="Rotate selected book counterclockwise">↶ Book</button>
+        <button id="book-3d-turn-right" aria-label="Rotate selected book clockwise">Book ↷</button>
+        <button id="book-3d-reset">Reset view</button>
+        <button id="book-3d-stack">Stack all</button>
+        <button id="book-3d-spread">Spread out</button>
+        <button id="book-3d-copy">Add current copy</button>
+        <button id="book-3d-open">Open selected book</button>
+      </div>
+      <p id="book-3d-help" aria-live="polite"></p>
+    </section>
     <p class="hint">Drag a page to turn it · ← → arrow keys</p>
     <details class="book-options"><summary>Book options</summary><div class="options">
       <label>Pages <input id="page-count" type="number" min="8" max="56" step="2" value="28" aria-label="Number of pages"></label>
@@ -91,9 +106,10 @@
     <p class="item-kicker">THE ARCHIVE</p><h2 id="shelf-title">My book shelf</h2>
     <p id="shelf-empty" class="save-hint">Books you save will stand here by their spines.</p>
     <div id="shelf-books" class="shelf-books"></div>
-    <div class="shelf-actions"><button id="save-copy" type="button">Save a copy</button><button id="close-shelf-action" type="button">Close</button></div>
+    <div class="shelf-actions"><button id="save-copy" type="button">Save a copy</button><button id="shelf-table" type="button">Arrange in 3D</button><button id="close-shelf-action" type="button">Close</button></div>
   </dialog>
   <script src="ink.js?v=8"></script>
-  <script src="script.js?v=45"></script>
+  <script src="closed-books-3d.js?v=1"></script>
+  <script src="script.js?v=46"></script>
 </body>
 </html>
