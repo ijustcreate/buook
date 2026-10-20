@@ -15,7 +15,7 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=r
   });
   await page.screenshot({path:path.join(output,'portrait-inferno.png')});
   await page.evaluate(()=>{document.querySelector('.book-options').open=true;});
-  await page.selectOption('#page-format','custom');await page.fill('#format-width','160');await page.fill('#format-height','240');await page.locator('#format-height').dispatchEvent('change');
+  await require('./reader-shell-test-tools.cjs')(page,'#page-format');await page.selectOption('#page-format','custom');await page.fill('#format-width','160');await page.fill('#format-height','240');await page.locator('#format-height').dispatchEvent('change');
   assert.ok(Math.abs(await page.evaluate(()=>bookFormatRatio(bookContent))-2/3)<.001);
   await page.reload();await page.waitForFunction(()=>loaded);assert.equal(await page.evaluate(()=>bookFormat().mode),'custom');
   const journey=await page.evaluate(async()=>{

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.30 — 2026-10-20
+
+- Enlarge the reading canvas and remove the permanent font/editor/settings toolbar and lower expandable controls from the reading layout.
+- Add a floating, non-modal Tools inspector with Reading, Book and Create & arrange tabs. Preserve existing controls, handlers and saved data; changing settings never shrinks the open book.
+- Keep only shelf/contents/tools shortcuts and compact previous/page/next navigation visible. Move page entry into a popover on the page indicator, with Enter-to-go.
+- Support outside-click/Esc dismissal, accessible keyboard tabs and mobile panels. Keep editing in an over-book workshop and page art in its floating drawing tools.
+- Verify large/mobile layouts, stable book size while panels are open, typography, page editing, uploads, navigation, cover transitions and insert inspection.
+
 ## 1.0.29 — 2026-10-20
 
 - Run page turns against real elapsed time rather than capped frame increments, so low frame rates no longer prolong the animation. Warm destination page textures before starting the clock.

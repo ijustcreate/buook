@@ -4,7 +4,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const output = path.join(root, 'dist');
 fs.mkdirSync(output, { recursive: true });
-for (const name of ['index.html', 'script.js', 'ink.js', 'closed-books-3d.js', 'starter-library.js', 'reader-ui.js', 'book-fonts.js', 'spine-ornaments.js', 'page-workshop.js', 'book-art.js', 'book-feel.js', 'book-formats.js', 'style.css']) {
+for (const name of ['index.html', 'script.js', 'ink.js', 'closed-books-3d.js', 'starter-library.js', 'reader-ui.js', 'book-fonts.js', 'spine-ornaments.js', 'page-workshop.js', 'book-art.js', 'book-feel.js', 'book-formats.js', 'style.css', 'reader-shell.js', 'reader-shell.css']) {
   fs.copyFileSync(path.join(root, name), path.join(output, name));
 }
 fs.cpSync(path.join(root, 'assets'), path.join(output, 'assets'), { recursive: true, filter:source=>!source.split(path.sep).includes('local-fonts') });

@@ -10,7 +10,7 @@ try{
   return{rows:rows.length,chapter:rows[1],contentsFont:sourceContentsLayout(3)[0].size,paragraphs:bookPage(4).body.split('\n\n').length};
  });
  await page.screenshot({path:path.join(output,'dorian-contents-preface.png')});
- await page.locator('#edit-pages-open').click();await page.selectOption('#edit-page','4');
+ await require('./reader-shell-test-tools.cjs')(page,'#edit-pages-open');await page.locator('#edit-pages-open').click();await page.selectOption('#edit-page','4');
  assert.equal(await page.locator('#workshop-type').inputValue(),'chapter');
  await page.locator('#edit-title').fill('Preface · edited');await page.locator('#edit-body').fill('First paragraph.\n\nSecond paragraph.');
  assert.equal(await page.evaluate(()=>bookPage(4).chapterOpening),'Preface · edited');
@@ -23,7 +23,7 @@ try{
  await page.locator('#workshop-undo').click();await page.selectOption('#edit-page','0');
  assert.equal(await page.locator('#workshop-type').inputValue(),'title');await page.locator('#workshop-author').fill('Oscar Wilde · local copy');
  await page.locator('#workshop-close').click();await page.reload();await page.waitForFunction(()=>loaded);assert.equal(await page.evaluate(()=>bookPage(0).titlePage.author),'Oscar Wilde · local copy');
- await page.evaluate(()=>$('#shelf').close());await page.setViewportSize({width:420,height:850});await page.locator('#edit-pages-open').click();assert(await page.locator('#page-workshop').evaluate(e=>e.scrollWidth<=e.clientWidth+2));
+ await page.evaluate(()=>$('#shelf').close());await page.setViewportSize({width:420,height:850});await require('./reader-shell-test-tools.cjs')(page,'#edit-pages-open');await page.locator('#edit-pages-open').click();assert(await page.locator('#page-workshop').evaluate(e=>e.scrollWidth<=e.clientWidth+2));
  await page.screenshot({path:path.join(output,'mobile-workshop.png')});assert.deepEqual(errors,[]);console.log(JSON.stringify({source,semanticEditing:true,undo:true,persistence:true,mobile:true,errors,output}));
 }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

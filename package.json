@@ -1,6 +1,6 @@
 {
   "name": "pixel-book",
-  "version": "1.0.29",
+  "version": "1.0.30",
   "private": true,
   "description": "A local, editable keeper's book.",
   "main": "main.cjs",
@@ -30,6 +30,8 @@
       "book-fonts.js",
       "spine-ornaments.js",
       "page-workshop.js",
+      "reader-shell.js",
+      "reader-shell.css",
       "book-art.js",
       "book-feel.js",
       "book-formats.js",

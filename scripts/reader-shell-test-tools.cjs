@@ -1,0 +1,2 @@
+// Existing behavior suites can reveal a control through the new UI shell.
+module.exports=async function reveal(page,selector){await page.evaluate(selector=>{const panel=document.querySelector('#reader-tools-panel'),control=document.querySelector(selector);if(!panel||!panel.contains(control))return;const section=control.closest('[role=tabpanel]');if(section)document.querySelector('[aria-controls="'+section.id+'"]').click();if(!panel.matches(':popover-open'))panel.showPopover();},selector);};
