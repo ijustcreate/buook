@@ -18,7 +18,7 @@ const {chromium,_electron}=require('playwright'),assert=require('node:assert/str
   assert.equal(await page.evaluate(()=>itemState(testInsert).taped&&itemState(testInsert).back),true);
   const strips=await page.evaluate(()=>insertTapeLayout(testInsert));assert.equal(strips.length,2);assert.ok(strips.every(s=>s.length<=58));
   await page.screenshot({path:path.join(output,'taped-back.png')});
-  if(!profile){await page.setViewportSize({width:320,height:640});const bounds=await page.locator('#insert-focus').boundingBox();assert.ok(bounds.x>=0&&bounds.x+bounds.width<=320.1);await page.screenshot({path:path.join(output,'mobile.png')});await page.setViewportSize({width:1180,height:950});}
+  if(!profile){await page.setViewportSize({width:320,height:640});await page.waitForFunction(()=>{const r=document.querySelector('#insert-focus').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+.1;});const bounds=await page.locator('#insert-focus').boundingBox();assert.ok(bounds.x>=0&&bounds.x+bounds.width<=320.1);await page.screenshot({path:path.join(output,'mobile.png')});await page.setViewportSize({width:1180,height:950});}
   await page.keyboard.press('Escape');await page.waitForFunction(()=>!inspection);
   await page.reload();await page.waitForFunction(()=>loaded);
   assert.equal(await page.evaluate(()=>itemState(keepsakes.find(i=>i.sheet===1)||keepsakes[0]).back),true);

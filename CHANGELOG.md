@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.29 — 2026-10-20
+
+- Run page turns against real elapsed time rather than capped frame increments, so low frame rates no longer prolong the animation. Warm destination page textures before starting the clock.
+- Reuse projected mesh vertices and per-mesh book state. Retain six texture rows, original resolution, font sizing, illustration data and geometry for all readable page faces.
+- Use one texture row only for mostly occluded paper-grain layers during turns; restore the exact full-detail idle mesh. Keep the visible stack ribbons, cover, binding and inserts unchanged.
+- Reuse unchanged page-lighting textures with source-identity and exact lighting keys.
+- Add before/after rendering, readable-detail, visual-difference and simulated slow-frame timing checks; retain the existing typography, contents, artwork, binding and insert regression checks.
+
 ## 1.0.28 — 2026-10-20
 
 - Lift keepsakes directly from the page into a transparent, centered inspection view, with floating labels/actions, restrained shadows and an animated return to the original placement.

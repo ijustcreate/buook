@@ -508,10 +508,13 @@ function litViewport(number,chain,side,turnShade=0) {
     const c=document.createElement('canvas');c.width=base.width;c.height=base.height;c.pageViewport=true;if(shadedTextures.size>=24)shadedTextures.delete(shadedTextures.keys().next().value);shadedTextures.set(number,c);
   }
   const surface=shadedTextures.get(number),p=surface.getContext('2d');
+  const slope=Math.atan2(Math.abs(chain[1].z-chain[0].z),Math.abs(chain[1].x-chain[0].x));
+  const lightingKey=side+':'+slope+':'+turnShade;
+  if(surface.lightingBase===base&&surface.lightingKey===lightingKey)return surface;
+  surface.lightingBase=base;surface.lightingKey=lightingKey;
   p.setTransform(base.width/PAGE_W,0,0,base.height/PAGE_H,0,0);
   p.clearRect(0,0,PAGE_W,PAGE_H);p.drawImage(base,0,0,PAGE_W,PAGE_H);
   const light=p.createLinearGradient(0,0,PAGE_W,0);
-  const slope=Math.atan2(Math.abs(chain[1].z-chain[0].z),Math.abs(chain[1].x-chain[0].x));
   for(let i=0;i<=30;i++) {
     const distance=side<0?1-i/30:i/30;
     const alpha=clamp((.24+.14*clamp(slope/(Math.PI/6)))*Math.exp(-distance*13)+.04*distance*distance+turnShade,0,.52);
@@ -616,12 +619,11 @@ function pagePerspective(v) {
   return {scale,vertical:v*scale,hinge:scale*(1+depth*.5)};
 }
 
-function project(point,v) {
+function project(point,v,state=bookState(),widthScale=bookWidthScale()) {
   // A homography foreshortens both the far-edge width and the texture rows.
   // The depth scale is shared by the paper and all of its underlying edges.
-  const state=bookState();
   const elevation=pageElevation(point.z),perspective=pagePerspective(v);
-  return {x:CX+state.shift*perspective.hinge+point.x*perspective.scale*bookWidthScale(),
+  return {x:CX+state.shift*perspective.hinge+point.x*perspective.scale*widthScale,
     y:mix(TOP-elevation*.55,BOTTOM-elevation,perspective.vertical)-state.rise};
 }
 
@@ -742,16 +744,20 @@ function buildTurningSheetDepth(chain) {
   return buffer;
 }
 
-function mesh(chain,texture,side,extraShade=0,backTexture=null) {
+function mesh(chain,texture,side,extraShade=0,backTexture=null,rowsOverride=null) {
   ctx.save();
-  const silhouette=[...chain.map(p=>project(p,0)),...chain.slice().reverse().map(p=>project(p,1))];
+  // Project each material vertex once, keeping the six readable texture rows.
+  const rows=rowsOverride??(backTexture||texture.pageViewport||texture.width===PAGE_W&&texture.height===PAGE_H?6:1);
+  const state=bookState(),widthScale=bookWidthScale();
+  const grid=Array.from({length:rows+1},(_,row)=>chain.map(point=>project(point,row/rows,state,widthScale)));
+  const silhouette=[...grid[0],...grid[rows].slice().reverse()];
   if(backTexture) {
     // A curled sheet projects overlapping front/back strips. An outline clip
     // cancels those opposite windings and cuts holes through the paper.
     // Build the union from consistently wound strip quads instead.
     ctx.beginPath();
     for(let i=0;i<SEGMENTS;i++) {
-      const points=[project(chain[i],0),project(chain[i+1],0),project(chain[i+1],1),project(chain[i],1)];
+      const points=[grid[0][i],grid[0][i+1],grid[rows][i+1],grid[rows][i]];
       let area=0;points.forEach((p,j)=>{const q=points[(j+1)%4];area+=p.x*q.y-q.x*p.y;});
       if(area<0)points.reverse();
       ctx.moveTo(points[0].x,points[0].y);points.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));ctx.closePath();
@@ -762,21 +768,21 @@ function mesh(chain,texture,side,extraShade=0,backTexture=null) {
   // would cut the binding edge off a correctly foreshortened resting leaf.
   for(let i=0;i<SEGMENTS;i++) {
     const a=chain[i],b=chain[i+1];
-    const points=[project(a,0),project(b,0),project(b,1),project(a,1)];
+
     const isBack=backTexture&&(b.x-a.x)*side<0;
     const faceSide=isBack?-side:side,face=isBack?backTexture:texture;
     const tw=face.width,th=face.height;
     const u0=(faceSide<0?1-a.u:a.u)*tw,u1=(faceSide<0?1-b.u:b.u)*tw;
-    const rows=backTexture||face.pageViewport||texture.width===PAGE_W&&texture.height===PAGE_H?6:1;
+
     ctx.imageSmoothingEnabled=face.width>PAGE_W&&!!face.pageViewport;
     for(let row=0;row<rows;row++){
       const v0=row/rows,v1=(row+1)/rows;
       quad(face,[{x:u0,y:v0*th},{x:u1,y:v0*th},{x:u1,y:v1*th},{x:u0,y:v1*th}],
-        [project(a,v0),project(b,v0),project(b,v1),project(a,v1)]);
+        [grid[row][i],grid[row][i+1],grid[row+1][i+1],grid[row+1][i]]);
     }
   }
   if(extraShade>0) {
-    const outline=[...chain.map(p=>project(p,0)),...chain.slice().reverse().map(p=>project(p,1))];
+    const outline=silhouette;
     ctx.fillStyle=`rgba(63,22,40,${extraShade})`;path(outline);ctx.fill();
   }
   ctx.restore();
@@ -798,7 +804,9 @@ function stacks(chain,side,amount,number=side>0?0:1) {
     const fraction=k/(leafCount+1);
     const under=chain.map(p=>({...p,x:p.x+foreEdge*fraction*p.u,
       z:elevationZ(pageElevation(p.z)-layerDepth(load,p.profileU??p.u)*fraction)}));
-    mesh(under,paperSurface(number+side*2*k),side,.05);
+    // Only the mostly occluded paper grain uses a lighter mesh in motion.
+    // Visible lettering, art, stack ribbons and the idle view stay full detail.
+    mesh(under,paperSurface(number+side*2*k),side,.05,null,motion?1:null);
   }
   // The vertical fore-edge and bottom ribbon meet at the exact same point.
   // Keep the strip's painted curl out of its UV range; the spline supplies
@@ -1973,14 +1981,16 @@ function finish(commit) {
 }
 
 function settle(commit=true,overrideDuration=null) {
+  // Prepare new page textures before the animation clock starts.
+  for(const number of [spread*2-1,spread*2,turnDestination()*2-1,turnDestination()*2])if(number>=0&&number<pageCount)viewport(number);
   const start=motion.progress,target=commit?1:0;
-  const duration=(overrideDuration??Number($('#speed').value))*Math.abs(target-start),time=performance.now();let previous=time,elapsed=0;
+  const duration=(overrideDuration??Number($('#speed').value))*Math.abs(target-start),time=performance.now();
   if(!motion.soundPlayed&&commit){motion.soundPlayed=true;playPaperSound(!!chapterJourney);}
   const frame=now=>{
     if(!motion)return;
-    // A stalled frame must not skip straight over the visible upright pose.
-    elapsed+=Math.min(34,Math.max(0,now-previous));previous=now;
-    const t=clamp(elapsed/Math.max(1,duration));
+    // Use real elapsed time: slow rendering must not stretch a 520ms turn
+    // into seconds. Missed frames advance the pose, not the duration.
+    const t=clamp((now-time)/Math.max(1,duration));
     motion.progress=mix(start,target,t);draw();
     if(t<1)raf=requestAnimationFrame(frame);else finish(commit);
   };
