@@ -37,9 +37,9 @@ let spineView=false,spineMotion=null;
 let bookTableMode=false;
 let queuedTurns=[];
 let tocHitAreas=[],highlightedToc=-1,jumpTimer=0;
-const PIXEL_SCALE=.64;
-// One low-resolution framebuffer gives the art, ink, shadows and motion the
-// same pixel size. Enlarging only the source sprites left the text too smooth.
+let PIXEL_SCALE=.64;
+// Keep the illustrated journal pixelated; full-text novels use a higher
+// resolution framebuffer and page textures so serif glyphs remain readable.
 canvas.width=Math.round(W*PIXEL_SCALE);canvas.height=Math.round(H*PIXEL_SCALE);
 ctx.setTransform(PIXEL_SCALE,0,0,PIXEL_SCALE,0,0);
 
@@ -57,6 +57,7 @@ async function load() {
   try {
     await loadStarterLibrary();
     seedStarterBooks();
+    migrateStarterEditions();pageCount=bookContent.pageCount;setBookResolution();
     await Promise.all(Object.entries({
       board:'inside-board-v3.png',binding:'open-spine-v3.png',stack:'page-stack-v2.png',leather:'leather-stack-v2.png',
       a:'page-a-v2.png', b:'page-b-v2.png', c:'page-c-v2.png',
@@ -145,11 +146,22 @@ const entries = [
 function loadBookContent() {
   try {
     const saved=JSON.parse(localStorage.getItem(contentKey)||'{}');
-    return {starterId:saved.starterId||null,name:saved.name||'The Keeper’s Book',pageCount:saved.pageCount||28,pages:saved.pages||{},edgeBookmarks:Array.isArray(saved.edgeBookmarks)?saved.edgeBookmarks:[],covers:{front:{},back:{},...(saved.covers||{})},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold',...(saved.palette||{})}};
+    return {starterId:saved.starterId||null,edition:saved.edition,sourcePageCount:saved.sourcePageCount,name:saved.name||'The Keeper’s Book',pageCount:saved.pageCount||28,pages:saved.pages||{},edgeBookmarks:Array.isArray(saved.edgeBookmarks)?saved.edgeBookmarks:[],covers:{front:{},back:{},...(saved.covers||{})},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold',...(saved.palette||{})}};
   } catch { return {name:'The Keeper’s Book',pageCount:28,pages:{},covers:{front:{},back:{}},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold'}}; }
 }
 
 const materialMasks=new WeakMap();
+function liningRegion(source,data){
+  const w=source.width,h=source.height,region=new Uint8Array(w*h),queue=new Uint32Array(w*h);
+  const fabric=i=>{const n=i*4,r=data[n],g=data[n+1],b=data[n+2];return data[n+3]>80&&r>g*1.2&&b>g*1.01&&b>r*.36&&r>25;};
+  const seed=Math.floor(h*.45)*w+Math.floor(w*.60);let head=0,tail=0;
+  if(fabric(seed)){region[seed]=1;queue[tail++]=seed;}
+  while(head<tail){const i=queue[head++],x=i%w,y=Math.floor(i/w);for(const j of [x?i-1:-1,x<w-1?i+1:-1,y?i-w:-1,y<h-1?i+w:-1])if(j>=0&&!region[j]&&fabric(j)){region[j]=1;queue[tail++]=j;}}
+  // Fill the quilt's darker stitches inside its traced silhouette. The row
+  // extents follow the sloped fabric edge instead of an axis-aligned inset.
+  for(let y=0;y<h;y++){let a=w,b=-1;for(let x=0;x<w;x++)if(region[y*w+x]){a=Math.min(a,x);b=x;}if(b>=a)region.fill(1,y*w+a,y*w+b+1);}
+  return region;
+}
 
 function spriteSurface(width,height) {
   const surface=document.createElement('canvas');surface.width=width;surface.height=height;return surface;
@@ -171,11 +183,12 @@ function assembledCover(board,binding) {
 function coverMaterialMask(source,kind,data) {
   if(materialMasks.has(source))return materialMasks.get(source);
   const mask=new Uint8Array(source.width*source.height*2);
+  const fabric=kind==='board'?liningRegion(source,data):null;
   for(let y=0;y<source.height;y++)for(let x=0;x<source.width;x++) {
     const pixel=y*source.width+x,i=pixel*4,u=x/source.width,v=y/source.height;
     const r=data[i],g=data[i+1],b=data[i+2];
     let lining=0,metal=0;
-    if(kind==='board')lining=smooth((x-94)/8)*smooth((y-73)/8)*smooth((479-y)/8);
+    if(kind==='board')lining=fabric[pixel];
     if(kind==='binding')lining=smooth((y-58)/12)*smooth((485-y)/14);
     const corner=kind==='board'?u<.35&&(v<.25||v>.70):kind==='outside'?u>.77&&(v<.23||v>.76):false;
     // Hardware is identified only inside the corner guards, not by applying
@@ -279,8 +292,10 @@ function viewport(number) {
   const key = number+':'+blank+':'+hand+':'+$('#margin-note').value+':'+JSON.stringify(custom);
   if(textures.has(key)) return textures.get(key);
   const surface = document.createElement('canvas');
-  surface.width = PAGE_W; surface.height = PAGE_H;
+  const resolution=custom.novel?2:1;
+  surface.width = PAGE_W*resolution; surface.height = PAGE_H*resolution;surface.pageViewport=true;
   const p = surface.getContext('2d');
+  p.scale(resolution,resolution);
   p.imageSmoothingEnabled = false;
   // The binding edge is straight and continuous; only the three exposed
   // parchment edges retain the tile's torn silhouette.
@@ -291,8 +306,9 @@ function viewport(number) {
     const font=custom.font||'pixel',inkColor=custom.ink||'#5b3e2d';
     const role=pageRole(number),title=custom.title??entry[1];
     if(custom.novel){
-      p.fillStyle=inkColor;p.font='12px Georgia';p.textBaseline='top';
-      String(custom.body||'').split('\n').forEach((line,i)=>p.fillText(line,45,42+i*15));
+      const layout=layoutNovelText(custom.body||'',p);
+      p.fillStyle=custom.ink||'#302019';p.font=layout.size+'px Georgia';p.textBaseline='top';
+      layout.lines.forEach((line,i)=>p.fillText(line,45,38+i*layout.lineHeight));
       drawPageNumber(p,number,custom.pageNumberPlacement||'bottom-center',hand);
     } else if(role==='contents') {
       p.fillStyle=inkColor;ink(p,'CONTENTS',45,31,1.05,hand);
@@ -356,6 +372,7 @@ function drawPageText(p,text,x,y,width,font,size,color,lineHeight) {
 }
 
 function drawPageNumber(p,number,placement,hand) {
+  if(number>=readingPageCount())return;
   if(pageRole(number)==='title'||pageRole(number)==='contents')return;
   const locations={'bottom-center':[188,326],'top-left':[25,20],'top-right':[350,20],'bottom-left':[25,326],'bottom-right':[350,326]};
   const [x,y]=locations[placement]||locations['bottom-center'];p.save();p.fillStyle='#5b3e2d';ink(p,String(automaticFolio(number)),x,y,1.2,hand);p.restore();
@@ -388,7 +405,7 @@ function navigateToChapter(target) {
 const defaultSections={2:'The road',4:'Field notes',8:'The reedbeds',12:'Pack & provisions',18:'The old mill',24:'Unfinished business'};
 function bookPage(number){return bookContent.pages[number]||starterLibrary.get(bookContent.starterId)?.pages[number]||{};}
 function pageRole(number){const custom=bookPage(number);return custom.role||(number===0?'title':number===1?'contents':defaultSections[number]?'section':'body');}
-function automaticFolio(number){let count=0;for(let i=0;i<=number;i++)if(pageRole(i)!=='title'&&pageRole(i)!=='contents')count++;return count;}
+function automaticFolio(number){if(bookContent.sourcePageCount)return number+1;let count=0;for(let i=0;i<=number;i++)if(pageRole(i)!=='title'&&pageRole(i)!=='contents')count++;return count;}
 function sectionPages(){return Array.from({length:pageCount},(_,page)=>({page,role:pageRole(page),label:bookPage(page).tocLabel||(bookPage(page).title||entries[page%entries.length][1]).replace(/\n/g,' ')})).filter(x=>x.role==='section');}
 
 function getUserImage(source,number) {
@@ -426,10 +443,11 @@ function drawDoodle(p,number,hand) {
 function litViewport(number,chain,side,turnShade=0) {
   const base=viewport(number);
   if(!shadedTextures.has(number)) {
-    const c=document.createElement('canvas');c.width=PAGE_W;c.height=PAGE_H;if(shadedTextures.size>=24)shadedTextures.delete(shadedTextures.keys().next().value);shadedTextures.set(number,c);
+    const c=document.createElement('canvas');c.width=base.width;c.height=base.height;c.pageViewport=true;if(shadedTextures.size>=24)shadedTextures.delete(shadedTextures.keys().next().value);shadedTextures.set(number,c);
   }
   const surface=shadedTextures.get(number),p=surface.getContext('2d');
-  p.clearRect(0,0,PAGE_W,PAGE_H);p.drawImage(base,0,0);
+  p.setTransform(base.width/PAGE_W,0,0,base.height/PAGE_H,0,0);
+  p.clearRect(0,0,PAGE_W,PAGE_H);p.drawImage(base,0,0,PAGE_W,PAGE_H);
   const light=p.createLinearGradient(0,0,PAGE_W,0);
   const slope=Math.atan2(Math.abs(chain[1].z-chain[0].z),Math.abs(chain[1].x-chain[0].x));
   for(let i=0;i<=30;i++) {
@@ -660,14 +678,15 @@ function mesh(chain,texture,side,extraShade=0,backTexture=null) {
   } else {path(silhouette);ctx.clip();}
   // The silhouette includes the slanted hinge. A vertical half-book clip
   // would cut the binding edge off a correctly foreshortened resting leaf.
-  const tw=texture.width,th=texture.height;
   for(let i=0;i<SEGMENTS;i++) {
     const a=chain[i],b=chain[i+1];
     const points=[project(a,0),project(b,0),project(b,1),project(a,1)];
     const isBack=backTexture&&(b.x-a.x)*side<0;
     const faceSide=isBack?-side:side,face=isBack?backTexture:texture;
+    const tw=face.width,th=face.height;
     const u0=(faceSide<0?1-a.u:a.u)*tw,u1=(faceSide<0?1-b.u:b.u)*tw;
-    const rows=backTexture||texture.width===PAGE_W&&texture.height===PAGE_H?6:1;
+    const rows=backTexture||face.pageViewport||texture.width===PAGE_W&&texture.height===PAGE_H?6:1;
+    ctx.imageSmoothingEnabled=face.width>PAGE_W&&!!face.pageViewport;
     for(let row=0;row<rows;row++){
       const v0=row/rows,v1=(row+1)/rows;
       quad(face,[{x:u0,y:v0*th},{x:u1,y:v0*th},{x:u1,y:v1*th},{x:u0,y:v1*th}],
@@ -1609,7 +1628,7 @@ $('#save-art').onclick=()=>{const page=currentPage();if(!page)return;const data=
 
 function seedStarterBooks(){
   if(localStorage.getItem('pixel-book-starters-v1'))return;
-  for(const starter of starterLibrary.values())if(!savedBooks.some(book=>book.id===starter.id))savedBooks.push({...starter,pages:{}});
+  for(const starter of starterLibrary.values())if(!starter.legacy&&!savedBooks.some(book=>book.id===starter.id))savedBooks.push({...starter,pages:{}});
   if(!savedBooks.some(book=>book.id==='starter-keeper'))savedBooks.push({id:'starter-keeper',name:'The Keeper’s Book',pageCount:28,pages:{},covers:{front:{},back:{}},palette:{outside:'#65402e',inside:'#c85e68',metal:'gold'}});
   localStorage.setItem('keepers-book-shelf-v1',JSON.stringify(savedBooks));localStorage.setItem('pixel-book-starters-v1','1');
 }
@@ -1620,7 +1639,7 @@ function renderShelf(){
     button.style.setProperty('--spine-width',`${Math.min(48,22+book.pageCount*.45)}px`);
     button.style.setProperty('--shelf-leather',book.palette?.outside||'#9b382d');
     button.style.setProperty('--shelf-metal',book.palette?.metal==='silver'?'#dce6ee':'#f0cd82');
-    button.innerHTML=`<span>${escapeText(book.name)}</span><small>${book.pageCount} pages</small>`;
+    button.innerHTML=`<span>${escapeText(book.name)}</span><small>${book.sourcePageCount||book.pageCount} pages</small>`;
     button.onclick=()=>openSavedBook(book.id);container.append(button);
   });
 }
@@ -1632,13 +1651,13 @@ function saveBook(copy=false){
   // previous named spine and make the renamed save its own book entry.
   if(book&&book.name!==bookName)book=null;
   if(!book){book={id:crypto.randomUUID(),name:bookName,pageCount,pages:{},covers:{}};savedBooks.push(book);activeBookId=book.id;localStorage.setItem('keepers-book-active',activeBookId);}
-  book.starterId=bookContent.starterId;book.name=bookName;book.pageCount=pageCount;book.pages=structuredClone(bookContent.pages);book.covers=structuredClone(bookContent.covers);book.palette={...bookContent.palette};book.edgeBookmarks=structuredClone(bookContent.edgeBookmarks||[]);book.savedAt=Date.now();
+  book.edition=bookContent.edition;book.sourcePageCount=bookContent.sourcePageCount;book.starterId=bookContent.starterId;book.name=bookName;book.pageCount=pageCount;book.pages=structuredClone(bookContent.pages);book.covers=structuredClone(bookContent.covers);book.palette={...bookContent.palette};book.edgeBookmarks=structuredClone(bookContent.edgeBookmarks||[]);book.savedAt=Date.now();
   localStorage.setItem('keepers-book-shelf-v1',JSON.stringify(savedBooks));persistBookContent();$('#status').textContent='Saved to your shelf.';renderShelf();
 }
 function openSavedBook(id,quiet=false){
   const book=savedBooks.find(entry=>entry.id===id);if(!book)return;
   bookTableMode=false;
-  bookName=book.name;bookContent.starterId=book.starterId||null;bookContent.name=book.name;bookContent.pageCount=book.pageCount;pageCount=book.pageCount;
+  bookName=book.name;bookContent.edition=book.edition;bookContent.sourcePageCount=book.sourcePageCount;bookContent.starterId=book.starterId||null;bookContent.name=book.name;bookContent.pageCount=book.pageCount;pageCount=book.pageCount;setBookResolution();
   bookContent.pages=structuredClone(book.pages||{});bookContent.covers={front:{},back:{},...(book.covers||{})};bookContent.palette={outside:'#9b382d',inside:'#c85e68',metal:'gold',...(book.palette||{})};activeBookId=id;localStorage.setItem('keepers-book-active',id);
   $('#book-name').value=bookName;$('#outside-color').value=bookContent.palette.outside;$('#inside-color').value=bookContent.palette.inside;$('#metal-color').value=bookContent.palette.metal;
   bookContent.edgeBookmarks=structuredClone(book.edgeBookmarks||[]);resetSessionInserts();restoreEdgeBookmarks();
@@ -1647,11 +1666,16 @@ function openSavedBook(id,quiet=false){
 $('#save-book').onclick=()=>saveBook(false);$('#save-copy').onclick=()=>saveBook(true);
 $('#book-name').oninput=()=>{bookName=$('#book-name').value;persistBookContent();draw();};
 $('#shelf-open').onclick=()=>{renderShelf();$('#shelf').showModal();};
-$('#go-page-button').onclick=()=>navigateToChapter(clamp(Number($('#go-page').value)-1,0,pageCount-1));
+$('#go-page-button').onclick=()=>jumpToReaderPage(Number($('#go-page').value));
 $('#close-shelf').onclick=$('#close-shelf-action').onclick=()=>$('#shelf').close();
-['#outside-color','#inside-color','#metal-color'].forEach(selector=>$(selector).onchange=()=>{
+let paletteFrame=0;
+function updatePaletteFromControls(){
   bookContent.palette.outside=$('#outside-color').value;bookContent.palette.inside=$('#inside-color').value;bookContent.palette.metal=$('#metal-color').value;
   persistBookContent();applyBookPalette();
+}
+['#outside-color','#inside-color','#metal-color'].forEach(selector=>{
+  $(selector).onchange=()=>{cancelAnimationFrame(paletteFrame);paletteFrame=0;updatePaletteFromControls();};
+  if(selector!=='#metal-color')$(selector).oninput=()=>{if(!paletteFrame)paletteFrame=requestAnimationFrame(()=>{paletteFrame=0;updatePaletteFromControls();});};
 });
 
 function refreshContentEditor() {
@@ -1713,11 +1737,14 @@ function initSymbolPicker() {
 }
 
 function updateControls() {
+  if(typeof updateReaderControls==='function')updateReaderControls();
   update3DControls();
-  $('#pagination').textContent=bookTableMode?'3D BOOK TABLE':closedEdge?`${closedEdge.toUpperCase()} COVER`:spread===0?'INSIDE FRONT — 1':spread===spreadCount()-1?`${pageCount} — INSIDE BACK`:`${spread*2} — ${Math.min(spread*2+1,pageCount)} / ${pageCount}`;
+  $('#pagination').textContent=bookTableMode?'3D BOOK TABLE':closedEdge?`${closedEdge.toUpperCase()} COVER`:bookContent.sourcePageCount?`${Math.min(Math.max(1,spread*2),readingPageCount())}–${Math.min(spread*2+1,readingPageCount())} / ${readingPageCount()}`:spread===0?'INSIDE FRONT — 1':spread===spreadCount()-1?`${pageCount} — INSIDE BACK`:`${spread*2} — ${Math.min(spread*2+1,pageCount)} / ${pageCount}`;
   $('#position').value=spread;
   $('#position').max=spreadCount()-1;
-  $('#page-count').value=pageCount;
+  $('#page-count').value=readingPageCount();
+  $('#page-count').disabled=!!bookContent.sourcePageCount;
+  $('#page-count').title=bookContent.sourcePageCount?'Page count follows the source PDF.':'';
   const viewLocked=bookTableMode||spineView||!!spineMotion||!!closedFlipMotion;
   $('#previous').disabled=viewLocked||!!motion||!!coverMotion||closedEdge==='front';
   $('#next').disabled=viewLocked||!!motion||!!coverMotion||closedEdge==='back';
@@ -1855,7 +1882,7 @@ $('#autoplay').onclick=()=>{
   if(active)stopAuto();else {autoDirection=spread===spreadCount()-1?-1:1;$('#autoplay').setAttribute('aria-pressed','true');if(!motion)begin(autoDirection);}
 };
 document.addEventListener('keydown',e=>{
-  if(inspection)return;
+  if(inspection||document.querySelector('#contents-dialog[open],#reading-view[open],#shelf[open]'))return;
   if(['INPUT','SELECT'].includes(e.target.tagName))return;
   if(e.key==='ArrowRight'){e.preventDefault();begin(1);}
   if(e.key==='ArrowLeft'){e.preventDefault();begin(-1);}
@@ -2281,7 +2308,7 @@ for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])canv
 canvas.addEventListener('wheel',event=>{if(closed3DActive()){event.preventDefault();closedBooks3D.zoom(event.deltaY);}},{passive:false});
 canvas.addEventListener('dblclick',event=>{if(closed3DActive()){event.preventDefault();open3DBook();}});
 document.addEventListener('keydown',event=>{
-  if(!closed3DActive()||['INPUT','TEXTAREA','SELECT','BUTTON'].includes(event.target.tagName)||$('#shelf').open)return;
+  if(!closed3DActive()||['INPUT','TEXTAREA','SELECT','BUTTON'].includes(event.target.tagName)||document.querySelector('dialog[open]'))return;
   if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter','+','-','q','e'].includes(event.key)){
     event.preventDefault();event.stopImmediatePropagation();
     if(event.key==='Enter')return open3DBook();

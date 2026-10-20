@@ -10,9 +10,11 @@ No installation or account is required. The browser version uses the same book r
 
 The approved working checkpoint is **v1.0.11**. The app displays **Pixel Book**; Windows installers/executables retain their legacy **The Book** identifier. The application ID and save location are intentionally unchanged so existing books keep working.
 
-The current development version is **v1.0.17**, with shelf-first startup, three starter books (Dracula, Frankenstein and the original Keeper’s Book), up to 4,096 pages, bounded novel thickness, and corner/Alt-drag insert rotation. It restores the upright ornate spine presentation with natural rotation controls, correctly oriented boards, silhouette-following edges and rounded endpaper binding curves. Existing page turns, insert occlusion and clickable edge bookmarks are retained. The `v1.0.11` checkpoint is preserved unchanged. The original `buook` web address and desktop profile remain unchanged to preserve saved books.
+The current development version is **v1.0.18**, with PDF-aligned novel pagination, sharper on-book text, an adjustable large-text reader, external contents/page navigation, full cover colour pickers and silhouette-aligned lining recolouring. It retains shelf-first startup, three starter books, up to 4,096 pages, natural photo tugging and the upright ornate 3D spine. The `v1.0.11` checkpoint is preserved unchanged. The original `buook` web address and desktop profile remain unchanged to preserve saved books.
 
-The novel text is extracted from the user-supplied public-domain PDFs (509 source pages for Dracula by Bram Stoker; 268 for Frankenstein by Mary Shelley), then repaginated for the parchment viewport. Pixel Book page counts differ from the source PDFs. The PDF text layer is retained; original extraction artifacts may remain. Bundled novel text is read-only base content; your page edits, book copies and shelf stay local. Startup adds missing starter editions once without replacing existing books.
+The novel text follows the supplied PDFs page for page, including blanks: **Dracula has 509 reading pages; Frankenstein has 268**. Dracula's physical binding has one extra blank reverse, excluded from reading-page counts. Original text-extraction artifacts may remain. Older expanded editions with edits or bookmarks are preserved as a separate “previous pagination” shelf copy during migration. Bundled novel text stays outside localStorage; your edits, copies and shelf remain local.
+
+Use **Contents** above the book to select a chapter, or the always-visible **Page / Go** box beneath it to jump to a PDF page number. **Read text** opens selectable, unwarped text with adjustable 18–34 px type and previous/next page buttons; returning to the book navigates to that same page. The main novel renderer also uses higher-resolution text without changing the original PDF's page boundaries. Outside and inside covers use native full-colour pickers.
 
 ## Inspiration and credit
 
@@ -114,6 +116,7 @@ node scripts/verify-closed-3d.cjs http://127.0.0.1:4174/
 node scripts/verify-cover-bridge.cjs http://127.0.0.1:4174/
 node scripts/verify-spine-presentation.cjs http://127.0.0.1:4174/
 node scripts/verify-library-and-photo.cjs http://127.0.0.1:4174/
+node scripts/verify-reader.cjs http://127.0.0.1:4174/
 node scripts/verify-edge-bookmarks.cjs http://127.0.0.1:4174/
 ```
 

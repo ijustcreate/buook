@@ -19,8 +19,8 @@ for key, title, author, filename, color in [
         text = re.sub(r'(?m)^\s*\d+\s*$', '', text)
         text = re.sub(r'(\w)-\n(\w)', r'\1\2', text)
         text = text.replace('\x00', '').strip()
-        if text:
-            pages.append(text)
+        # Preserve blank source pages so PDF page N remains book page N.
+        pages.append(text)
     books.append(dict(id=key, name=title, author=author, outside=color,
                       source=filename, sourcePages=len(reader.pages), textPages=pages))
 destination = root / 'assets' / 'starter-novels.json'

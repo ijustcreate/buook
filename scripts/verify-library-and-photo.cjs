@@ -16,16 +16,17 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=req
     const geometry=await page.evaluate(()=>{
       const result=[];$('#shelf').close();
       for(const novel of starterLibrary.values()){
+        if(novel.legacy)continue;
         openSavedBook(novel.id);const chapters=sectionPages();
         if(pageCount<100||pageCount>4096||!chapters.length)throw new Error('Novel pagination/contents failed');
-        const p=document.createElement('canvas').getContext('2d');p.font='12px Georgia';
+        const p=document.createElement('canvas').getContext('2d');
         let lines=0;
         for(const data of Object.values(novel.pages))if(data.novel){
-          const rows=data.body.split('\n');if(rows.length>18)throw new Error('Text overflows page height');
-          for(const row of rows)if(p.measureText(row).width>305)throw new Error('Text overflows page width');lines+=rows.length;
+          const layout=layoutNovelText(data.body,p);if(layout.lines.length*layout.lineHeight>274.01)throw new Error('Text overflows page height');
+          p.font=layout.size+'px Georgia';for(const row of layout.lines)if(p.measureText(row).width>305)throw new Error('Text overflows page width');lines+=layout.lines.length;
         }
         spread=Math.floor(pageCount/4);draw();
-        result.push({name:novel.name,pages:pageCount,sourcePages:novel.sourcePages,chapters:chapters.length,lines,height:ClosedBooks3D.thickness(pageCount),openThickness:pageThickness()});
+        result.push({name:novel.name,pages:readingPageCount(),sourcePages:novel.sourcePageCount,chapters:chapters.length,lines,height:ClosedBooks3D.thickness(pageCount),openThickness:pageThickness()});
       }
       return result;
     });await capture('novel-spread');

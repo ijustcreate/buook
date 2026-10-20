@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.18 — 2026-10-20
+
+- Restore PDF-aligned pagination: Dracula 509 pages and Frankenstein 268, retaining blank source pages and excluding a blank binding reverse from reading counts.
+- Preserve edited/bookmarked expanded editions as separate previous-pagination shelf copies during migration.
+- Add always-visible Contents, page-number jump controls and selectable large-text reading with adjustable 18–34 px type.
+- Render novel textures/framebuffers at higher resolution and preserve correct front/back UV dimensions during turns.
+- Replace preset outside/inside colour menus with full colour pickers; trace the lining's true silhouette to eliminate untinted rose strips along sloped edges.
+
 ## 1.0.17 — 2026-10-20
 
 - Start on the local shelf with Dracula, Frankenstein and the original Keeper’s Book; preserve existing shelf entries and seed starter editions only once.

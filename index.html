@@ -6,27 +6,26 @@
   <title>Pixel Book</title>
   <meta name="description" content="Pixel Book — editable pixel-art books with turning pages, a 3D book table and a locally saved shelf.">
   <link rel="icon" type="image/png" href="assets/buook-icon-v1.png">
-  <link rel="stylesheet" href="style.css?v=25">
+  <link rel="stylesheet" href="style.css?v=26">
 </head>
 <body>
   <main>
-    <div class="library-toolbar"><button id="shelf-open">My shelf</button></div>
+    <div class="library-toolbar"><button id="shelf-open">My shelf</button><button id="contents-open">Contents</button><button id="read-text">Read text</button><span id="reader-book-name"></span></div>
     <header><span>THE ARCHIVE</span><h1>A keeper’s book</h1></header>
     <div class="book-stage">
       <canvas id="book" width="1000" height="680" aria-label="Interactive book. Drag a page corner or use the arrow buttons to turn pages." tabindex="0"></canvas>
       <p id="loading" role="status">Opening the book…</p>
     </div>
-    <details class="reader-tools"><summary>Book controls</summary>
-    <nav aria-label="Book navigation">
+    <div class="reader-navigation"><nav aria-label="Book navigation">
       <button id="previous" aria-label="Previous spread">←</button>
       <output id="pagination" aria-live="polite">1 — 2 / 28</output>
       <button id="next" aria-label="Next spread">→</button>
-    </nav>
+    </nav><label>Page <input id="go-page" type="number" min="1" value="1" aria-label="Go to page"><button id="go-page-button">Go</button></label></div>
+    <details class="reader-tools"><summary>Book controls</summary>
     <button id="close-book" class="close-book">Close book</button>
     <button id="flip-closed" class="close-book" hidden>Flip to back cover</button>
     <button id="spine-view" class="close-book">View spine</button>
     <button id="book-table" class="close-book">3D book table</button>
-    <label>Go to page <input id="go-page" type="number" min="1" value="1"><button id="go-page-button">Go</button></label>
     <section id="book-3d-controls" class="book-3d-controls" aria-label="Closed book 3D controls" hidden>
       <div class="three-d-actions">
         <button id="book-3d-orbit" aria-pressed="true">Rotate view</button>
@@ -48,8 +47,8 @@
       <label>Pages <input id="page-count" type="number" min="8" max="4096" step="2" value="28" aria-label="Number of pages"></label>
       <label>Book name <input id="book-name" maxlength="32" value="The Keeper’s Book" aria-label="Book name for the spine"></label>
       <button id="save-book">Save to shelf</button>
-      <label>Outside <select id="outside-color"><option value="#9b382d">Oxblood</option><option value="#31594c">Forest green</option><option value="#34466a">Midnight blue</option><option value="#65402e">Dark brown</option></select></label>
-      <label>Inside <select id="inside-color"><option value="#c85e68">Rose</option><option value="#b59b62">Parchment gold</option><option value="#587a62">Sage</option><option value="#59688a">Slate blue</option></select></label>
+      <label>Outside <input id="outside-color" type="color" value="#9b382d" aria-label="Outside cover colour"></label>
+      <label>Inside <input id="inside-color" type="color" value="#c85e68" aria-label="Inside lining colour"></label>
       <label>Hardware <select id="metal-color"><option value="gold">Gold</option><option value="silver">Silver</option></select></label>
       <label>Position <input id="position" type="range" min="0" max="14" step="1" value="0" aria-label="Book position"></label>
       <label>Speed <select id="speed"><option value="280">Quick</option><option value="520">Normal</option><option value="1100">Slow</option></select></label>
@@ -96,6 +95,15 @@
     </details>
     <p id="status" role="status"></p>
   </main>
+  <dialog id="contents-dialog" aria-labelledby="contents-title">
+    <div class="reader-dialog-heading"><div><p id="contents-book-name"></p><h2 id="contents-title">Table of contents</h2></div><button id="contents-close" aria-label="Close contents">×</button></div>
+    <p>Choose a chapter, or use the page box below the book.</p><div id="contents-list"></div>
+  </dialog>
+  <dialog id="reading-view" aria-labelledby="reading-title">
+    <div class="reader-dialog-heading"><div><h2 id="reading-title"></h2><p id="reading-folio"></p></div><button id="reading-close">Back to book</button></div>
+    <div class="reading-tools"><button id="reading-previous">← Previous page</button><label>Text size <input id="reading-size" type="range" min="18" max="34" step="1" value="22"><output id="reading-size-value">22 px</output></label><button id="reading-next">Next page →</button></div>
+    <article id="reading-text" tabindex="0" aria-label="Readable page text"></article>
+  </dialog>
   <dialog id="inspect" aria-labelledby="item-title">
     <button id="close-item" aria-label="Close inspection">×</button>
     <p class="item-kicker">TUCKED BETWEEN THE PAGES</p>
@@ -114,7 +122,8 @@
   </dialog>
   <script src="ink.js?v=8"></script>
   <script src="closed-books-3d.js?v=4"></script>
-  <script src="starter-library.js?v=2"></script>
-  <script src="script.js?v=50"></script>
+  <script src="starter-library.js?v=3"></script>
+  <script src="script.js?v=51"></script>
+  <script src="reader-ui.js?v=1"></script>
 </body>
 </html>
