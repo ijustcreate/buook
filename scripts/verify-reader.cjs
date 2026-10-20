@@ -4,6 +4,7 @@ const {chromium,_electron}=require('playwright'),assert=require('node:assert/str
   const profile=process.env.BOOK_QA_EXE?await fs.mkdtemp(path.join(os.tmpdir(),'pixel-book-reader-profile-')):null;
   const browser=profile?await _electron.launch({executablePath:process.env.BOOK_QA_EXE,args:['--user-data-dir='+profile]}):await chromium.launch({channel:'msedge',headless:true});
   const page=profile?await browser.firstWindow():await browser.newPage({viewport:{width:1500,height:1000}}),errors=[];
+  if(profile)await browser.evaluate(({BrowserWindow})=>{for(const window of BrowserWindow.getAllWindows())window.webContents.setBackgroundThrottling(false);});
   page.on('pageerror',e=>errors.push(e.message));
   page.setDefaultTimeout(60000);
   const ready=()=>page.waitForFunction(()=>loaded,null,{timeout:60000});
