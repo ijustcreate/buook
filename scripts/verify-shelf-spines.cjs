@@ -11,7 +11,7 @@ const {chromium,_electron}=require('playwright'),assert=require('node:assert/str
       if(actual.length!==expected.length||actual.some((v,i)=>v!==expected[i]))throw new Error('Shelf differs from 3D spine material');
       if(!actual.some((v,i)=>i%4===3&&v===0))throw new Error('Opaque rectangular fill on shelf spine');
       return{id:book.id,width:button.getBoundingClientRect().width,height:canvas.getBoundingClientRect().height,name:button.getAttribute('aria-label')};
-    }));assert.equal(spines.length,10);assert(spines.find(b=>b.id==='starter-dracula').width>spines.find(b=>b.id==='starter-keeper').width);
+    }));assert.equal(spines.length,11);assert(spines.find(b=>b.id==='starter-dracula').width>spines.find(b=>b.id==='starter-keeper').width);
     assert(spines.find(b=>b.id==='starter-dracula').height>spines.find(b=>b.id==='starter-frankenstein').height);
     await page.screenshot({path:path.join(output,'ornate-shelf.png')});
     await page.locator('[data-book-id="starter-dorian-gray"]').click();assert.equal(await page.evaluate(()=>activeBookId),'starter-dorian-gray');

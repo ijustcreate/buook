@@ -15,6 +15,11 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
       for(const pages of [8,28,268,510])for(const edge of ['front','back'])for(const amount of [0,.1,.25,.5,.75,.9,1]){
         pageCount=pages;spread=edge==='front'?0:spreadCount()-1;
         const pose=bridgeCoverPose(edge,amount);
+        if(pose.points[2].y>624+.001)throw new Error('Moving cover sweeps below the supporting board');
+        for(const u of [0,.5,1]){
+          const cap=bridgeBindingPoint(pose,u,1.1,amount),base=bridgeBindingPoint(pose,u,1,amount);
+          if(amount===.5&&Math.abs(cap.y-base.y)>.001)throw new Error('Upright binding tail penetrates tabletop');
+        }
         for(let i=0;i<=12;i++){
           const v=i/12,moving=bridgeBindingPoint(pose,pose.side<0?0:1,v,amount),fixed=bridgeBindingPoint(pose,pose.side<0?1:0,v,amount);
           const expected={x:mix(pose.points[0].x,pose.points[3].x,v),y:mix(pose.points[0].y,pose.points[3].y,v)},other=coverPoint(pose.side<0?SPINE_END:BOARD_SEAM,v*565);

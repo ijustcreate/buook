@@ -13,7 +13,7 @@ const {chromium,_electron}=require('playwright'),assert=require('node:assert/str
     await set('frankenstein',2);await page.screenshot({path:path.join(output,'frankenstein-contents.png')});
     const contents=await page.evaluate(()=>({total:sectionPages().length,rows:[2,3,4].map(n=>bookPage(n).tocRows),layout:[2,3,4].map(n=>sourceContentsLayout(n))}));
     assert.equal(contents.total,31);assert.deepEqual(contents.rows.map(r=>r.length),[12,17,2]);
-    for(const rows of contents.layout){assert(rows.at(-1).y+rows.at(-1).h<=310);for(let i=1;i<rows.length;i++)assert(rows[i].y>=rows[i-1].y+rows[i-1].h);}
+    for(const rows of contents.layout){assert(rows.every(r=>r.y+r.h<=310));for(let i=1;i<rows.length;i++)if(rows[i].x===rows[i-1].x)assert(rows[i].y>=rows[i-1].y+rows[i-1].h);}
     for(const [tocPage,target] of [[2,32],[3,178],[4,242]]){
       await set('frankenstein',Math.ceil(tocPage/2));
       const hit=await page.evaluate(({tocPage,target})=>{const h=tocHitAreas.find(h=>h.page===tocPage&&h.target===target);if(!h)throw new Error('TOC hit missing');const r=canvas.getBoundingClientRect();return{x:r.left+(h.x+h.w*.55)*r.width/W,y:r.top+(h.y+h.h*.5)*r.height/H};},{tocPage,target});

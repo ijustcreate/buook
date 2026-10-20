@@ -5,6 +5,7 @@ Produces read-only design metadata; never repaginates or modifies source PDFs.
 import json
 import re
 import statistics
+import unicodedata
 from pathlib import Path
 import pdfplumber
 import pypdfium2 as pdfium
@@ -72,6 +73,23 @@ def design_book(book, filename):
         first=body.splitlines()[0].strip() if body.strip() else ''
         if re.fullmatch(r'(?:Chapter|CHAPTER|Canto|Act)\s+(?:[IVXLCDM]+|\d+)', first):
             data['chapterOpening']=first
+        # Front matter has real paragraph gaps and a separate heading. Recover
+        # those from placed lines rather than flattening PDF extraction runs.
+        if first.casefold() in ('preface', 'introduction', 'foreword', 'prologue'):
+            placed=doc.pages[index].extract_text_lines()
+            heading=next((i for i,line in enumerate(placed) if line['text'].strip().casefold()==first.casefold()),None)
+            if heading is not None:
+                lines=[line for line in placed[heading+1:] if not re.fullmatch(r'\s*\d+\s*',line['text'])]
+                gaps=[b['top']-a['top'] for a,b in zip(lines,lines[1:])]
+                leading=statistics.median(gaps) if gaps else 14
+                paragraphs=[];paragraph='';previous=None
+                for line in lines:
+                    value=unicodedata.normalize('NFKC',line['text']).replace('\x00','').strip()
+                    if previous is not None and line['top']-previous['top']>leading*1.25:
+                        paragraphs.append(paragraph);paragraph=''
+                    paragraph=(paragraph+' '+value).strip();previous=line
+                if paragraph:paragraphs.append(paragraph)
+                data.update(chapterOpening=first,body=first+'\n\n'+'\n\n'.join(paragraphs))
         rows = []
         for ref in page.get('/Annots', []):
             link = ref.get_object()
@@ -89,8 +107,16 @@ def design_book(book, filename):
                 continue
             line = ' '.join(w['text'] for w in sorted(words, key=lambda w: w['x0']))
             match = re.match(r'(.+?)\s+([ivxlcdm]+|\d+)\s*$', line, re.I)
-            label = match[1] if match else line
-            folio = match[2] if match else str(target+1)
+            known=next((c for c in design['contents'] if c['page']==target and c['sourceLabel'].casefold()==line.casefold()),None)
+            if known:
+                # "Chapter I" is a chapter name, not "Chapter" + folio I.
+                label=line
+                target_lines=(reader.pages[target].extract_text() or '').splitlines()
+                printed=[s.strip() for s in target_lines if re.fullmatch(r'\s*\d+\s*',s)]
+                folio=printed[-1] if printed else str(target+1)
+            else:
+                label = match[1] if match else line
+                folio = match[2] if match else str(target+1)
             if any(r['target'] == target and r['label'] == label for r in rows):
                 continue
             rows.append({'label': label, 'target': target, 'folio': folio,

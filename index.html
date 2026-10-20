@@ -6,7 +6,7 @@
   <title>Pixel Book</title>
   <meta name="description" content="Pixel Book — editable pixel-art books with turning pages, a 3D book table and a locally saved shelf.">
   <link rel="icon" type="image/png" href="assets/buook-icon-v1.png">
-  <link rel="stylesheet" href="style.css?v=28">
+  <link rel="stylesheet" href="style.css?v=30">
 </head>
 <body>
   <main>
@@ -87,6 +87,13 @@
         <label>Lettering <select id="cover-font"><option value="serif">Antique serif</option><option value="pixel">Pixel inscription</option><option value="script">Handwritten</option></select></label>
         <label>Placement <select id="cover-placement"><option value="top">Upper</option><option value="center">Centered</option><option value="bottom">Lower</option></select></label>
         <div class="symbol-picker-wrap"><span>Cover symbol <button id="remove-symbol" type="button" class="symbol-remove">None</button></span><div id="cover-symbols" class="symbol-grid" role="group" aria-label="Choose a cover symbol"></div></div>
+        <fieldset class="spine-ornament-settings"><legend>Spine ornaments</legend>
+          <label>Top <select id="spine-ornament-top"></select></label><label>Bottom <select id="spine-ornament-bottom"></select></label>
+          <label>Choose end <select id="spine-ornament-end"><option value="top">Top</option><option value="bottom">Bottom</option></select></label>
+          <label>Collection <select id="spine-ornament-bank"><option value="0">Bookbinder flourishes</option><option value="1">Art-history collection</option></select></label>
+          <label class="ornament-flip"><input id="spine-ornament-flip" type="checkbox" checked>Turn bottom outward</label><button id="spine-ornament-pair" type="button">Use matching pair</button>
+          <div id="spine-ornament-grid" class="spine-ornament-grid" role="group" aria-label="Choose a spine ornament"></div>
+        </fieldset>
         <p class="save-hint">Choose a gilded emblem; choose None to remove it. Saves in this browser.</p>
       </div>
     </details>
@@ -121,10 +128,13 @@
     <div class="shelf-actions"><button id="save-copy" type="button">Save a copy</button><button id="shelf-table" type="button">Arrange in 3D</button><button id="close-shelf-action" type="button">Close</button></div>
   </dialog>
   <script src="ink.js?v=8"></script>
-  <script src="closed-books-3d.js?v=4"></script>
-  <script src="starter-library.js?v=5"></script>
+  <script src="closed-books-3d.js?v=6"></script>
+  <script src="starter-library.js?v=6"></script>
   <script src="book-fonts.js?v=2"></script>
-  <script src="script.js?v=57"></script>
-  <script src="reader-ui.js?v=4"></script>
+  <script src="spine-ornaments.js?v=1"></script>
+  <script src="book-art.js?v=1"></script>
+  <script src="script.js?v=61"></script>
+  <script src="reader-ui.js?v=5"></script>
+  <script src="page-workshop.js?v=1"></script>
 </body>
 </html>

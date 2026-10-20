@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.27 — 2026-10-20
+
+- Replace the old catch-all page form with a page workshop: all-page navigation/search, live flat preview, composition-specific text/title/contents/verse controls, typography and illustration tabs, local autosave, per-page undo and source restore.
+- Fix chapter Roman numerals being mistaken for contents folios. Use readable two-column contents where needed and retain front-matter headings/paragraph gaps from PDF geometry.
+- Let early leaves drape from the shared binding lip onto the board, retaining equal material-distance mapping.
+- Add pen-cursor, dotted polygon image regions directly on the curved page; JPG/PNG original or reversible pixel-ink upload; page-bound clipping and turning.
+- Store new uploads and drawings as SHA-256-addressed IndexedDB blobs rather than base64 in localStorage. Preserve existing images and original uploads.
+- Add a reusable PDF/HTML illustration pipeline and personal skill, with compact original/pixel-ink variants, provenance, scanned-page review and lazy loading.
+- Add a separate Cary/Doré Inferno from Gutenberg 8800: 34 cantos, 75 illustrations and 340 new pages; retain the existing complete Divine Comedy untouched.
+
+## 1.0.26 — 2026-10-20
+
+- Add two 5×5 transparent pixel-art ornament atlases: bookbinder flourishes and art-history-inspired variation. Select top/bottom independently, choose complementary arrow/key pairs, or keep the original flourish; migrate starter books to themed pairs without overwriting custom selections.
+- Use paper leaves plus cover boards for shelf thickness, so short works are substantially thinner than long novels.
+- Correct both drag axes for standalone closed books while retaining table orbit conventions.
+- Warp the opening book as a connected material surface, removing detached stationary binding/shadow remnants. Fold the tail upward during the raised-cover arc and hide unrelated controls during the transition.
+- Add a 3D standing bookshelf at the table's far end, persistent table/shelf placement, and an accessible right-click menu for moving, reading and inspecting books.
+
 ## 1.0.25 — 2026-10-20
 
 - Use a single body font size per edition/font, checked against every text region; sparse pages retain whitespace instead of magnifying text. Preserve title/chapter heading hierarchy and source pagination.

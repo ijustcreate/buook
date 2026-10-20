@@ -4,13 +4,14 @@
 const starterLibrary=new Map();
 const sourceIllustrations=new Map();
 async function loadStarterLibrary(){
-  const designResponse=await fetch('assets/book-designs.json?v=1');if(!designResponse.ok)throw new Error('Book design metadata could not be loaded');
+  const designResponse=await fetch('assets/book-designs.json?v=2');if(!designResponse.ok)throw new Error('Book design metadata could not be loaded');
   const designs=await designResponse.json();
-  const responses=await Promise.all(['assets/starter-novels.json?v=2','assets/classic-library.json?v=1'].map(url=>fetch(url)));
+  const responses=await Promise.all(['assets/starter-novels.json?v=2','assets/classic-library.json?v=1','assets/inferno-dore.json?v=1'].map(url=>fetch(url)));
   if(responses.some(response=>!response.ok))throw new Error('Starter library could not be loaded');
   const novels=(await Promise.all(responses.map(response=>response.json()))).flat(),p=document.createElement('canvas').getContext('2d');
   p.font='12px Georgia';
   for(const novel of novels){
+    if(novel.design)designs[novel.id]=novel.design;
     const leaves=[],chapters=[],pages={};let lastChapter='';
     for(const [index,text] of novel.textPages.entries()){
       const marker=novel.chapters?.find(chapter=>chapter.page===index);
@@ -49,7 +50,12 @@ async function loadStarterLibrary(){
     starterLibrary.set(novel.id+'-legacy',{...common,starterId:novel.id+'-legacy',edition:1,pageCount:count,pages:old,legacy:true});
   }
   const figures=Object.values(designs).flatMap(design=>Object.values(design.pages).flatMap(page=>page.sourceFigures||[]));
-  await Promise.all(figures.map(async figure=>{const img=new Image();img.src=figure.src;await img.decode();sourceIllustrations.set(figure.src,img);}));
+  await Promise.all(figures.filter(figure=>!figure.lazy).map(async figure=>{const img=new Image();img.src=figure.src;await img.decode();sourceIllustrations.set(figure.src,img);}));
+}
+function getSourceIllustration(src){
+  let image=sourceIllustrations.get(src);
+  if(!image){image=new Image();sourceIllustrations.set(src,image);image.onload=()=>{textures.clear();shadedTextures.clear();draw();if(typeof refreshWorkshopPreview==='function')refreshWorkshopPreview();};image.src=src;}
+  return image.complete&&image.naturalWidth?image:null;
 }
 function migrateStarterEditions(){
   let changed=false;
