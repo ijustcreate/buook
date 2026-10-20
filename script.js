@@ -71,6 +71,7 @@ async function load() {
     $('#inside-color').value=bookContent.palette.inside;
     $('#metal-color').value=bookContent.palette.metal;
     applyBookPalette(false);
+    restoreEdgeBookmarks();
     loaded = true;
     $('#book-name').value=bookName;
     loading.hidden = true;
@@ -142,7 +143,7 @@ const entries = [
 function loadBookContent() {
   try {
     const saved=JSON.parse(localStorage.getItem(contentKey)||'{}');
-    return {name:saved.name||'The Keeper’s Book',pageCount:saved.pageCount||28,pages:saved.pages||{},covers:{front:{},back:{},...(saved.covers||{})},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold',...(saved.palette||{})}};
+    return {name:saved.name||'The Keeper’s Book',pageCount:saved.pageCount||28,pages:saved.pages||{},edgeBookmarks:Array.isArray(saved.edgeBookmarks)?saved.edgeBookmarks:[],covers:{front:{},back:{},...(saved.covers||{})},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold',...(saved.palette||{})}};
   } catch { return {name:'The Keeper’s Book',pageCount:28,pages:{},covers:{front:{},back:{}},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold'}}; }
 }
 
@@ -729,6 +730,8 @@ function draw() {
   tocHitAreas=[];
   turningSheetDepth=null;
   ctx.clearRect(0,0,W,H);ctx.imageSmoothingEnabled=false;
+  if(motion?.gutterContacts?.length)updateGutterContacts();
+  if(coverMotion?.bridge){coverMotion.bridge.draw();return;}
   if(closed3DActive()){drawClosed3D();return;}
   if(spineView&&!spineMotion){drawSpineView();return;}
   ctx.save();ctx.fillStyle='rgba(0,0,0,.45)';
@@ -758,6 +761,7 @@ function draw() {
   if(rightNumber>=pageCount)restingItems(resting(1,1),pageCount,1,'over');
   if(leftNumber>=0)stacks(left,-1,clamp(fractional/(spreadCount()-1)),leftNumber);
   if(rightNumber<pageCount)stacks(right,1,clamp(1-fractional/(spreadCount()-1)),rightNumber);
+  paintHiddenEdgeBookmarks(left,right,leftNumber,rightNumber);
   if(leftNumber>=0){restingItems(left,leftNumber,-1,'under');mesh(left,litViewport(leftNumber,left,-1),-1);registerTocAreas(leftNumber,left,-1);restingItems(left,leftNumber,-1,'over');}
   if(rightNumber<pageCount){restingItems(right,rightNumber,1,'under');mesh(right,litViewport(rightNumber,right,1),1);registerTocAreas(rightNumber,right,1);restingItems(right,rightNumber,1,'over');}
   if(motion) {
@@ -1040,22 +1044,9 @@ function paintCoverCustomization(edge,points) {
     [bilerp(points,u0,v0),bilerp(points,u1,v0),bilerp(points,u1,v1),bilerp(points,u0,v1)]);
 }
 
-function animateCover(edge,closing) {
-  if(motion||coverMotion||closedFlipMotion||spineMotion||spineView||inspection||!loaded)return false;
-  const resumeAuto=!closing&&$('#autoplay').getAttribute('aria-pressed')==='true';
-  stopAuto();drag=null;closedEdge=null;
-  if(resumeAuto)$('#autoplay').setAttribute('aria-pressed','true');
-  coverMotion={edge,amount:closing?0:1};updateControls();
-  const start=performance.now(),duration=Number($('#speed').value)*1.1;
-  const frame=now=>{
-    const t=clamp((now-start)/duration),p=sine(t);
-    coverMotion.amount=closing?p:1-p;draw();
-    if(t<1)raf=requestAnimationFrame(frame);
-    else{
-      closedEdge=closing?edge:null;coverMotion=null;raf=0;updateControls();draw();
-      if(!closing&&$('#autoplay').getAttribute('aria-pressed')==='true')autoTimer=setTimeout(()=>begin(autoDirection),550);
-    }
-  };raf=requestAnimationFrame(frame);return true;
+function animateCover(edge,closing,sourceScene=null) {
+  if(motion||coverMotion||closedFlipMotion||spineMotion||inspection||!loaded)return false;
+  return startCoverBridge(edge,closing,sourceScene);
 }
 
 function flipClosedBook() {
@@ -1106,7 +1097,7 @@ const itemMounts=new Map(keepsakes.map(item=>[item.sheet,{
   back:false,under:false,outside:false,outsideX:500,outsideY:130,u:.64,v:.82,rotation:-.07
 }]));
 const mountedTextures=new Map();
-function itemState(item){return itemMounts.get(item.sheet);}
+function itemState(item){return motion?.gutterContacts?.find(contact=>contact.item===item)?.pose||itemMounts.get(item.sheet);}
 function itemsOnPage(number) {
   if(number < -1 || number > pageCount)return [];
   return allInserts().filter(item=>{
@@ -1160,8 +1151,8 @@ function itemTexture(item,back) {
   itemTextures.set(key,c);return c;
 }
 
-function mountedTexture(item,back=false) {
-  const taped=itemState(item).taped,key=item.sheet+':'+back+':'+taped;
+function mountedTexture(item,back=false,tapedOverride=null) {
+  const taped=tapedOverride??itemState(item).taped,key=item.sheet+':'+back+':'+taped;
   if(mountedTextures.has(key))return mountedTextures.get(key);
   const c=document.createElement('canvas');c.width=208;c.height=164;
   const p=c.getContext('2d');p.imageSmoothingEnabled=false;
@@ -1234,10 +1225,12 @@ function rigidInsertPoint(chain,side,number,pose,rx,ry,width) {
 }
 
 function paintPageItem(item,chain,side,number,{faceOnly=false,hit=false,occlude=false}={}) {
-  const pose=itemPose(item,number),front=mountedTexture(item,pose.back),reverse=faceOnly?null:mountedTexture(item,!pose.back),itemSize=item.type==='feather'?3:1,
+  const pose=itemPose(item,number),itemSize=item.type==='feather'?3:1,
     width=128*208/180*itemSize,height=96*164/136*itemSize;
-  const cs=Math.cos(pose.rotation),sn=Math.sin(pose.rotation);
   const state=itemState(item);
+  if(state.edgeMark&&side!==(state.edgeMark.page%2===0?1:-1)){pose.back=!pose.back;pose.rotation=-pose.rotation;}
+  const front=mountedTexture(item,pose.back,state.edgeMark&&pose.back?false:null),reverse=faceOnly?null:mountedTexture(item,!pose.back,state.edgeMark&&!pose.back?false:null);
+  const cs=Math.cos(pose.rotation),sn=Math.sin(pose.rotation);
   // A loose photograph is a stiff card, not another piece of the flexible
   // leaf. One tangent plane prevents its front/back strips folding through
   // each other and cancelling to nothing at the curl's inflection.
@@ -1248,7 +1241,7 @@ function paintPageItem(item,chain,side,number,{faceOnly=false,hit=false,occlude=
   const tangent={x:(tangentB.x-tangentA.x)/tangentLength,z:(tangentB.z-tangentA.z)/tangentLength};
   const masked=occlude&&turningSheetDepth&&motion.progress>0&&motion.progress<1;
   let target=ctx,cardDepth=null,cardU=null;
-  const bounds=[];
+  const bounds=[],hitTriangles=[];
   if(masked) {
     if(insertLayer.width!==canvas.width||insertLayer.height!==canvas.height){insertLayer.width=canvas.width;insertLayer.height=canvas.height;}
     target=insertLayerContext;target.setTransform(1,0,0,1,0,0);target.clearRect(0,0,insertLayer.width,insertLayer.height);
@@ -1274,9 +1267,10 @@ function paintPageItem(item,chain,side,number,{faceOnly=false,hit=false,occlude=
     const image=turnedOver?reverse:front;
     const u0=turnedOver?1-i/12:i/12,u1=turnedOver?1-(i+1)/12:(i+1)/12;
     const points=[locate(x0,y0),locate(x1,y0),locate(x1,y1),locate(x0,y1)];
-    quad(image,[{x:u0*image.width,y:row/4*image.height},{x:u1*image.width,y:row/4*image.height},
-      {x:u1*image.width,y:(row+1)/4*image.height},{x:u0*image.width,y:(row+1)/4*image.height}],
-      points,target);
+    const uv=[{x:u0*image.width,y:row/4*image.height},{x:u1*image.width,y:row/4*image.height},
+      {x:u1*image.width,y:(row+1)/4*image.height},{x:u0*image.width,y:(row+1)/4*image.height}];
+    quad(image,uv,points,target);
+    if(hit)for(const indices of [[0,1,2],[0,2,3]])hitTriangles.push({image,uv:indices.map(i=>uv[i]),points:indices.map(i=>points[i])});
     if(masked) {
       const depths=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]].map(([x,y])=>pose.v+(x*sn+y*cs)/PAGE_H);
       const us=[[x0,y0],[x1,y0],[x1,y1],[x0,y1]].map(([x,y])=>pose.u+side*(x*cs-y*sn)/PAGE_W);
@@ -1308,7 +1302,7 @@ function paintPageItem(item,chain,side,number,{faceOnly=false,hit=false,occlude=
   if(hit) {
     const polygon=[[-width/2,-height/2],[width/2,-height/2],[width/2,height/2],[-width/2,height/2]].map(([x,y])=>locate(x,y));
     const xs=polygon.map(p=>p.x),ys=polygon.map(p=>p.y),{x,y}=locate(0,0);
-    itemHits.push({item,back:pose.back,pageNumber:number,underY:null,side,x,y,w:Math.max(...xs)-Math.min(...xs),h:Math.max(...ys)-Math.min(...ys),polygon});
+    itemHits.push({item,back:pose.back,pageNumber:number,underY:null,side,x,y,w:Math.max(...xs)-Math.min(...xs),h:Math.max(...ys)-Math.min(...ys),polygon,hitTriangles,bookmark:!!state.edgeMark});
   }
 }
 
@@ -1328,9 +1322,9 @@ function turningItems(chain,layer='over') {
   const items=[...new Set([...itemsOnPage(sourceNumber),...itemsOnPage(destination)])];
   for(const item of items) {
     const state=itemState(item);
-    if(state.taped) {
-      const side=state.anchorPage===sourceNumber?motion.direction:-motion.direction;
-      paintPageItem(item,chain,side,state.anchorPage,{faceOnly:true,occlude:true});continue;
+    if(state.taped||state.edgeMark) {
+      const number=state.edgeMark?.page??state.anchorPage,side=number===sourceNumber?motion.direction:-motion.direction;
+      paintPageItem(item,chain,side,number,{faceOnly:!state.edgeMark,occlude:true});continue;
     }
     if(state.pageNumber===sourceNumber) {
       // Until it lands, even a loose card occupies only the source face.
@@ -1342,6 +1336,74 @@ function turningItems(chain,layer='over') {
   }
 }
 
+const insertAlphaCache=new WeakMap();
+function opaqueInsertHit(hit,point) {
+  if(!hit.hitTriangles)return true;
+  for(const tri of hit.hitTriangles){
+    const [a,b,c]=tri.points,det=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);if(Math.abs(det)<.001)continue;
+    const s=((point.x-a.x)*(c.y-a.y)-(point.y-a.y)*(c.x-a.x))/det;
+    const t=((b.x-a.x)*(point.y-a.y)-(b.y-a.y)*(point.x-a.x))/det;
+    if(s<0||t<0||s+t>1)continue;
+    let alpha=insertAlphaCache.get(tri.image);
+    if(!alpha){const p=spriteSurface(tri.image.width,tri.image.height).getContext('2d');p.drawImage(tri.image,0,0);alpha=p.getImageData(0,0,tri.image.width,tri.image.height).data;insertAlphaCache.set(tri.image,alpha);}
+    const [A,B,C]=tri.uv,x=Math.floor(A.x+s*(B.x-A.x)+t*(C.x-A.x)),y=Math.floor(A.y+s*(B.y-A.y)+t*(C.y-A.y));
+    if(x>=0&&x<tri.image.width&&y>=0&&y<tri.image.height&&alpha[(y*tri.image.width+x)*4+3]>=64)return true;
+  }return false;
+}
+
+function rememberEdgeBookmark(item) {
+  const state=itemState(item);delete state.edgeMark;
+  if(!state.outside&&Number.isInteger(state.pageNumber)){
+    const size=item.type==='feather'?3:1,texture=mountedTexture(item,state.back),bounds=opaqueBounds(texture);
+    const w=128*208/180*size*(bounds.right-bounds.left)/texture.width,h=96*164/136*size*(bounds.bottom-bounds.top)/texture.height;
+    const hx=(w*Math.abs(Math.cos(state.rotation))+h*Math.abs(Math.sin(state.rotation)))/2/PAGE_W;
+    const hy=(h*Math.abs(Math.cos(state.rotation))+w*Math.abs(Math.sin(state.rotation)))/2/PAGE_H;
+    const candidates=[['top',hy-state.v],['bottom',state.v+hy-1],[state.pageNumber%2?'left':'right',state.u+hx-1]].sort((a,b)=>b[1]-a[1]);
+    if(candidates[0][1]>.015)state.edgeMark={page:state.pageNumber,edge:candidates[0][0],along:candidates[0][0]==='top'||candidates[0][0]==='bottom'?state.u:state.v,
+      overhang:candidates[0][1],depthFraction:clamp((Math.floor(state.pageNumber/2)+.5)/(pageCount/2)),u:state.u,v:state.v,rotation:state.rotation};
+  }
+  persistEdgeBookmarks();
+}
+function persistEdgeBookmarks() {
+  bookContent.edgeBookmarks=allInserts().filter(item=>itemMounts.get(item.sheet)?.edgeMark).map(item=>({item:{...item},state:{...itemMounts.get(item.sheet)}}));
+  persistBookContent();
+}
+function restoreEdgeBookmarks() {
+  for(const state of itemMounts.values())if(state.edgeMark){delete state.edgeMark;state.outside=false;state.pageNumber=99999;}
+  for(const entry of bookContent.edgeBookmarks||[]){
+    if(!entry.item||!entry.state?.edgeMark||!Number.isInteger(entry.item.sheet))continue;
+    const state=entry.state;if(!['top','bottom','left','right'].includes(state.edgeMark.edge)||![state.u,state.v,state.rotation,state.edgeMark.page].every(Number.isFinite))continue;
+    let item=allInserts().find(item=>item.sheet===entry.item.sheet);
+    if(!item){item={...entry.item};customInserts.push(item);nextInsertId=Math.max(nextInsertId,item.sheet-999);}
+    itemMounts.set(item.sheet,{...state,outside:false,pageNumber:clamp(state.edgeMark.page,-1,pageCount),edgeMark:{...state.edgeMark,page:clamp(state.edgeMark.page,-1,pageCount)}});
+  }
+  mountedTextures.clear();
+}
+function polygonContains(point,polygon) {
+  let inside=false;for(let i=0,j=polygon.length-1;i<polygon.length;j=i++){
+    const a=polygon[i],b=polygon[j];if((a.y>point.y)!==(b.y>point.y)&&point.x<(b.x-a.x)*(point.y-a.y)/(b.y-a.y)+a.x)inside=!inside;
+  }return inside;
+}
+function paintHiddenEdgeBookmarks(left,right,leftNumber,rightNumber) {
+  const outline=chain=>[...chain.map(p=>project(p,0)),...chain.slice().reverse().map(p=>project(p,1))];
+  const pages=[];if(leftNumber>=0)pages.push(outline(left));if(rightNumber<pageCount)pages.push(outline(right));
+  const source=motion?(motion.direction===1?spread*2:spread*2-1):null;
+  for(const item of allInserts()){
+    const state=itemState(item),mark=state.edgeMark;if(!mark||itemDrag?.item===item)continue;
+    const number=mark.page;
+    if(number===leftNumber||number===rightNumber||motion&&(number===source||number===source+motion.direction))continue;
+    const side=number<spread*2?-1:1,leaves=pageCount/2,leaf=Math.floor(number/2);
+    const fraction=number<0||number>=pageCount?0:side<0?clamp((leaf+.5)/Math.max(1,spread)):clamp((leaves-leaf-.5)/Math.max(1,leaves-spread));
+    const top=side<0?left:right;
+    const fractional=spread+(motion?motion.direction*sine(motion.progress):0),load=side<0?fractional/(spreadCount()-1):1-fractional/(spreadCount()-1);
+    const depth=pageBlockDepth(load),book=bookState(),fore=side*(depth*.30+Math.max(0,side*(book.coverShift-book.shift)));
+    const chain=top.map(p=>({...p,x:p.x+fore*(1-fraction)*p.u,z:elevationZ(pageElevation(p.z)-layerDepth(load,p.u)*(1-fraction))}));
+    const support=outline(chain),start=itemHits.length;
+    ctx.save();ctx.beginPath();ctx.rect(-W,-H,W*3,H*3);support.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.clip('evenodd');
+    paintPageItem(item,chain,side,number,{hit:!motion&&!coverMotion});ctx.restore();
+    for(const hit of itemHits.slice(start)){hit.hiddenMark=true;hit.visibleAt=point=>!polygonContains(point,support)&&!pages.some(polygon=>polygonContains(point,polygon));}
+  }
+}
 function itemHit(point) {
   const contains=(polygon)=>{
     let inside=false;
@@ -1355,7 +1417,58 @@ function itemHit(point) {
   };
   return itemHits.slice().reverse().find(h=>Math.abs(point.x-h.x)<h.w/2+8&&Math.abs(point.y-h.y)<h.h/2+8
     &&(!h.polygon||contains(h.polygon))
+    &&opaqueInsertHit(h,point)
+    &&(!h.visibleAt||h.visibleAt(point))
     &&(h.underY===null||point.y>h.underY+1));
+}
+
+function prepareGutterContacts() {
+  const direction=motion.direction,receiving=direction===1?spread*2-1:spread*2;
+  const contacts=[];
+  for(const item of allInserts()){
+    const state=itemMounts.get(item.sheet);if(state.taped||state.edgeMark)continue;
+    const side=state.pageNumber%2===0?1:-1,amount=side<0?spread/(spreadCount()-1):1-spread/(spreadCount()-1);
+    const chain=resting(side,amount),center=state.outside?{x:state.outsideX,y:state.outsideY}:insertSurfacePoint(chain,side,state.pageNumber,state.u,state.v);
+    if(!state.outside&&![spread*2-1,spread*2].includes(state.pageNumber))continue;
+    const texture=mountedTexture(item,state.back),b=opaqueBounds(texture),size=item.type==='feather'?3:1;
+    const w=128*208/180*size*(b.right-b.left)/texture.width,h=96*164/136*size*(b.bottom-b.top)/texture.height;
+    const half=(w*Math.abs(Math.cos(state.rotation))+h*Math.abs(Math.sin(state.rotation)))/2;
+    const hinge=CX+bookState().shift*pagePerspective(state.v||.5).hinge;
+    if(center.y<TOP-25||center.y>BOTTOM+15||center.x-half>=hinge-3||center.x+half<=hinge+3)continue;
+    const support=resting(-direction,-direction<0?spread/(spreadCount()-1):1-spread/(spreadCount()-1));
+    let u=0,v=state.v||.5;
+    for(let i=0;i<10;i++){
+      const p=insertSurfacePoint(support,-direction,receiving,u,v),a=insertSurfacePoint(support,-direction,receiving,u+.001,v),b=insertSurfacePoint(support,-direction,receiving,u,v+.001);
+      const ax=(a.x-p.x)/.001,ay=(a.y-p.y)/.001,bx=(b.x-p.x)/.001,by=(b.y-p.y)/.001,det=ax*by-ay*bx;
+      if(Math.abs(det)<.001)break;u+=((center.x-p.x)*by-(center.y-p.y)*bx)/det;v+=(ax*(center.y-p.y)-ay*(center.x-p.x))/det;
+    }
+    contacts.push({item,initialU:u,half,pose:{...state,outside:false,under:false,pageNumber:receiving,u,v:clamp(v,.04,.96)}});
+  }
+  motion.gutterContacts=contacts;
+}
+function updateGutterContacts() {
+  const d=motion.direction;
+  for(const contact of motion.gutterContacts){
+    const amount=-d<0?spread/(spreadCount()-1):1-spread/(spreadCount()-1),support=resting(-d,amount);
+    const anchor=sampleItemChain(support,contact.initialU),height=anchor.z+3;
+    let center=anchor.x;
+    // Sweep the actual sheet cross-section against the card's two edges. A
+    // steep sheet face pushes laterally; a nearly flat leaf is not a wall.
+    const steps=Math.max(1,Math.ceil(motion.progress*36));
+    for(let n=0;n<=steps;n++){
+      const chain=turnChain(d,motion.progress*n/steps);
+      for(let i=1;i<chain.length;i++){
+        const a=chain[i-1],b=chain[i],dz=b.z-a.z,dx=b.x-a.x;
+        if(Math.abs(dz)/Math.hypot(dx,dz)<.32||height<Math.min(a.z,b.z)||height>Math.max(a.z,b.z))continue;
+        const x=mix(a.x,b.x,(height-a.z)/dz);
+        if(x<center-contact.half-3||x>center+contact.half+3)continue;
+        center=d>0?Math.min(center,x-contact.half-2):Math.max(center,x+contact.half+2);
+      }
+    }
+    let lo=-.4,hi=1.25;
+    for(let i=0;i<20;i++){const u=(lo+hi)/2;if(sampleItemChain(support,u).x*(-d)<center*(-d))lo=u;else hi=u;}
+    contact.pose.u=(lo+hi)/2;
+  }
 }
 
 function refreshKeepsakes() {
@@ -1413,7 +1526,7 @@ $('#tape-item').onclick=()=>{
     state.u=pose.u;state.v=pose.v;state.rotation=pose.rotation;
     state.taped=true;state.anchorPage=inspection.pageNumber;state.pageNumber=inspection.pageNumber;
   }
-  inspection.back=false;mountedTextures.clear();refreshKeepsakes();draw();renderInspection();
+  inspection.back=false;mountedTextures.clear();rememberEdgeBookmark(inspection.item);refreshKeepsakes();draw();renderInspection();
 };
 $('#close-item').onclick=()=>$('#inspect').close();
 $('#inspect').addEventListener('close',()=>{inspection=null;});
@@ -1488,16 +1601,17 @@ function saveBook(copy=false){
   // previous named spine and make the renamed save its own book entry.
   if(book&&book.name!==bookName)book=null;
   if(!book){book={id:crypto.randomUUID(),name:bookName,pageCount,pages:{},covers:{}};savedBooks.push(book);activeBookId=book.id;localStorage.setItem('keepers-book-active',activeBookId);}
-  book.name=bookName;book.pageCount=pageCount;book.pages=structuredClone(bookContent.pages);book.covers=structuredClone(bookContent.covers);book.palette={...bookContent.palette};book.savedAt=Date.now();
+  book.name=bookName;book.pageCount=pageCount;book.pages=structuredClone(bookContent.pages);book.covers=structuredClone(bookContent.covers);book.palette={...bookContent.palette};book.edgeBookmarks=structuredClone(bookContent.edgeBookmarks||[]);book.savedAt=Date.now();
   localStorage.setItem('keepers-book-shelf-v1',JSON.stringify(savedBooks));persistBookContent();$('#status').textContent='Saved to your shelf.';renderShelf();
 }
-function openSavedBook(id){
+function openSavedBook(id,quiet=false){
   const book=savedBooks.find(entry=>entry.id===id);if(!book)return;
   bookTableMode=false;
   bookName=book.name;bookContent.name=book.name;bookContent.pageCount=book.pageCount;pageCount=book.pageCount;
   bookContent.pages=structuredClone(book.pages||{});bookContent.covers={front:{},back:{},...(book.covers||{})};bookContent.palette={outside:'#9b382d',inside:'#c85e68',metal:'gold',...(book.palette||{})};activeBookId=id;localStorage.setItem('keepers-book-active',id);
   $('#book-name').value=bookName;$('#outside-color').value=bookContent.palette.outside;$('#inside-color').value=bookContent.palette.inside;$('#metal-color').value=bookContent.palette.metal;
-  applyBookPalette(false);spread=0;closedEdge=null;motion=null;queuedTurns=[];textures.clear();updateControls();draw();$('#shelf').close();persistBookContent();
+  bookContent.edgeBookmarks=structuredClone(book.edgeBookmarks||[]);restoreEdgeBookmarks();
+  applyBookPalette(false);spread=0;closedEdge=null;motion=null;queuedTurns=[];textures.clear();if(!quiet){updateControls();draw();}$('#shelf').close();persistBookContent();
 }
 $('#save-book').onclick=()=>saveBook(false);$('#save-copy').onclick=()=>saveBook(true);
 $('#book-name').oninput=()=>{bookName=$('#book-name').value;persistBookContent();draw();};
@@ -1594,11 +1708,12 @@ function stopAuto() {
 
 function finish(commit) {
   if(commit) {
+    for(const contact of motion.gutterContacts||[])Object.assign(itemMounts.get(contact.item.sheet),contact.pose);
     const source=motion.direction===1?spread*2:spread*2-1,destination=source-motion.direction;
     for(const item of allInserts()) {
       const state=itemState(item);
-      if(state.taped||state.outside)continue;
-      if(state.pageNumber===source) {
+      if(state.taped||state.outside||state.edgeMark)continue;
+      if(state.pageNumber===source&&!motion.gutterContacts?.some(contact=>contact.item===item)) {
         state.pageNumber=destination;state.back=!state.back;
         // Deposit onto the face that was opposite before this turn, not
         // onto the reverse of the moving leaf. The landed leaf can cover it;
@@ -1649,7 +1764,7 @@ function begin(direction,manual=false) {
   if(spread===spreadCount()-1&&direction>0)return animateCover('back',true);
   if(spread+direction<0||spread+direction>=spreadCount())return false;
   clearTimeout(autoTimer);autoTimer=0;
-  motion={direction,progress:0};updateControls();
+  motion={direction,progress:0};prepareGutterContacts();updateControls();
   if(!manual)settle(true);
   return true;
 }
@@ -1726,8 +1841,13 @@ function pageAt(point) {
   return {side,number:pageNumber,cover};
 }
 function placeLooseItem(item,point,grab=null) {
-  const page=pageAt(point);
+  let page=pageAt(point);
   const state=itemState(item),book=bookState();
+  delete state.edgeMark;
+  const hinge=CX+book.shift;
+  if(!page&&point.y>TOP-35&&point.y<BOTTOM+20&&Math.abs(point.x-hinge)<32){
+    const side=point.x<hinge?-1:1;page=pageAt({...point,x:hinge+side*36});
+  }
   state.under=false;
   if(!page) {
     state.outside=true;state.pageNumber=null;
@@ -1748,7 +1868,7 @@ function placeLooseItem(item,point,grab=null) {
     const dx=target.x-p.x,dy=target.y-p.y;
     u+=(dx*by-dy*bx)/det;v+=(ax*dy-ay*dx)/det;
   }
-  state.u=clamp(u,.08,.94);state.v=clamp(v,.04,.96);
+  state.u=clamp(u,0,1.12);state.v=clamp(v,-.12,1.12);
   return true;
 }
 
@@ -1774,7 +1894,9 @@ canvas.addEventListener('pointerdown',e=>{
   if(spineView||spineMotion)return;
   if(closedEdge){animateCover(closedEdge,false);return;}
   if(coverMotion)return;
-  const p=point(e);if(p.y<100||p.y>590)return;
+  const p=point(e);
+  const bookmarkHit=itemHit(p);if(bookmarkHit?.hiddenMark){navigateToChapter(itemState(bookmarkHit.item).edgeMark.page);return;}
+  if((p.y<100||p.y>590)&&!bookmarkHit)return;
   const toc=tocHitAreas.find(area=>p.x>=area.x&&p.x<=area.x+area.w&&p.y>=area.y&&p.y<=area.y+area.h);
   if(toc){navigateToChapter(toc.target);return;}
   const hit=itemHit(p);
@@ -1831,7 +1953,8 @@ canvas.addEventListener('pointermove',e=>{
 canvas.addEventListener('pointerup',e=>{
   if(itemDrag) {
     const current=itemDrag, moved=current.moved;itemDrag=null;canvas.style.cursor='grab';
-    if(moved){refreshKeepsakes();draw();}
+    if(moved){rememberEdgeBookmark(current.item);refreshKeepsakes();draw();}
+    else if(itemState(current.item).edgeMark)navigateToChapter(itemState(current.item).edgeMark.page);
     else openItem(current.item,itemState(current.item).back,current.pageNumber);
     return;
   }
@@ -1851,7 +1974,7 @@ const current3DBook=()=>({...bookContent,id:activeBookId||'current-unsaved',name
 function closed3DActive(){return loaded&&!coverMotion&&!closedFlipMotion&&!spineMotion&&(bookTableMode||!!closedEdge||spineView);}
 function closedMaterials(book) {
   const palette={outside:'#9b382d',inside:'#c85e68',metal:'gold',...book.palette};
-  const key=JSON.stringify([book.name,palette,book.covers]);
+  const key=JSON.stringify([book.name,palette,book.covers,book.edgeBookmarks]);
   if(closedMaterialCache.has(key))return closedMaterialCache.get(key);
   const outside=tintCoverSprite(baseAssets.front,'outside',palette);
   const symbols=tintCoverSprite(baseAssets.symbols,'symbols',palette);
@@ -1872,12 +1995,15 @@ function closedMaterials(book) {
   };
   const spine=titledSpine(tintCoverSprite(baseAssets.spine,'spine',palette),book.name||'Untitled book',palette);
   const bounds=opaqueBounds(assets.stack);
-  const result={front:makeCover('front'),back:makeCover('back'),spine,paper:assets.stack,leather:coverInk(.6,palette.outside),
+  const bookmarks=(book.edgeBookmarks||[]).filter(entry=>entry.state?.edgeMark&&entry.item).map(entry=>({
+    ...entry.state.edgeMark,u:entry.state.u,v:entry.state.v,rotation:entry.state.rotation,
+    size:entry.item.type==='feather'?3:1,front:mountedTexture(entry.item,false,entry.state.taped),back:mountedTexture(entry.item,true,false)}));
+  const result={front:makeCover('front'),back:makeCover('back'),spine,paper:assets.stack,leather:coverInk(.6,palette.outside),bookmarks,
     paperUV:{x:bounds.left+18,y:bounds.top+3,w:bounds.right-bounds.left-36,h:bounds.bottom-bounds.top-6}};
   if(closedMaterialCache.size>24)closedMaterialCache.delete(closedMaterialCache.keys().next().value);
   closedMaterialCache.set(key,result);return result;
 }
-const closedBooks3D=new ClosedBooks3D({canvas,context:ctx,materials:closedMaterials,changed:()=>{if(!closedSceneSyncing){draw();update3DControls();}},open:()=>open3DBook()});
+const closedBooks3D=new ClosedBooks3D({canvas,context:ctx,materials:closedMaterials,changed:()=>{if(!closedSceneSyncing){draw();update3DControls();}},open:page=>open3DBook(page)});
 function drawClosed3D() {
   const current=current3DBook(),books=bookTableMode?[current,...savedBooks.filter(book=>book.id!==current.id)]:[current];
   const key=JSON.stringify([bookTableMode,spineView,closedEdge,books.map(book=>[book.id,book.pageCount])]);
@@ -1901,15 +2027,155 @@ function update3DControls() {
   const selected=closedBooks3D.selected?.book?.name||bookName;
   $('#book-3d-help').textContent=bookTableMode?`${selected} · ${closedBooks3D.mode==='move'?'Drag a book onto another to stack; drag away to separate.':'Drag to orbit; click a book to select.'} Scroll to zoom.`:'Drag to spin the closed book · scroll to zoom · double-click to open';
 }
-function open3DBook() {
-  const selected=closedBooks3D.selected,wasTable=bookTableMode;
-  bookTableMode=false;closedBooks3D.gesture=null;
-  if(wasTable&&selected&&selected.id!==(activeBookId||'current-unsaved')){spineView=false;openSavedBook(selected.id);return;}
-  const edge=closedEdge||'front';spineView=false;closedEdge=edge;spread=edge==='front'?0:spreadCount()-1;
-  animateCover(edge,false);
+function open3DBook(targetPage=null) {
+  if(!closed3DActive())return;
+  const scene=captureClosedScene(),selected=closedBooks3D.selected;
+  if(Number.isInteger(targetPage))scene.openTarget=targetPage;
+  if(bookTableMode&&selected&&selected.id!==(activeBookId||'current-unsaved'))openSavedBook(selected.id,true);
+  animateCover(closedEdge||'front',false,scene);
+}
+
+// The bridge has two geometric stages: move the actual selected 3D model into
+// the reading camera, then hinge its board over an exact open-renderer capture.
+// Only the already-aligned endpoint materials are blended at the hand-off.
+let bookReturnScene=null;
+function captureClosedScene() {
+  const r=document.querySelector('.book-stage').getBoundingClientRect();
+  return {models:closedBooks3D.models.map(m=>({...m,book:structuredClone(m.book)})),selected:closedBooks3D.selected?.id,
+    yaw:closedBooks3D.yaw,pitch:closedBooks3D.pitch,distance:closedBooks3D.distance,center:{...closedBooks3D.target()},
+    table:bookTableMode,spine:spineView,edge:closedEdge,mode:closedBooks3D.mode,rect:{x:r.x,y:r.y,width:r.width}};
+}
+function defaultClosedScene(edge) {
+  const virtual=new ClosedBooks3D({canvas,context:ctx,materials:closedMaterials,changed:()=>{}});
+  virtual.setBooks([current3DBook()]);virtual.pitch=edge==='back'?-1.05:.85;
+  return {models:virtual.models,selected:virtual.selected.id,yaw:virtual.yaw,pitch:virtual.pitch,distance:virtual.distance,
+    center:{...virtual.target()},table:false,spine:false,edge,mode:'orbit'};
+}
+function restoreClosedScene(scene) {
+  bookTableMode=scene.table;spineView=scene.spine;closedEdge=scene.edge;
+  Object.assign(closedBooks3D,{models:scene.models.map(m=>({...m})),yaw:scene.yaw,pitch:scene.pitch,distance:scene.distance,
+    center:{...scene.center},table:scene.table,mode:scene.mode,gesture:null,dragTarget:null});
+  closedBooks3D.selected=closedBooks3D.models.find(m=>m.id===scene.selected)||closedBooks3D.models[0];
+  const current=current3DBook(),books=bookTableMode?[current,...savedBooks.filter(book=>book.id!==current.id)]:[current];
+  closedSceneKey=JSON.stringify([bookTableMode,spineView,closedEdge,books.map(book=>[book.id,book.pageCount])]);
+}
+function bridgeCoverPose(edge,amount) {
+  const side=edge==='front'?-1:1,seam=side<0?BOARD_SEAM:SPINE_END,target=side<0?SPINE_END:BOARD_SEAM,outer=side<0?0:1024;
+  const closedCenter=(coverPoint(target,565).x+coverPoint(side<0?1024:0,565).x)/2;
+  const angle=Math.PI*amount,lift=115*Math.sin(angle),hinge=mix(seam,target,amount);
+  const top=coverPoint(hinge,0),bottom=coverPoint(hinge,565);
+  const wt=Math.abs(coverPoint(outer,0).x-coverPoint(seam,0).x),wb=Math.abs(coverPoint(outer,565).x-coverPoint(seam,565).x);
+  return {side,points:[top,{x:top.x+side*wt*Math.cos(angle),y:134-lift},{x:bottom.x+side*wb*Math.cos(angle),y:624-lift},bottom],
+    source:[coverPoint(seam,0),coverPoint(outer,0),coverPoint(outer,565),coverPoint(seam,565)],
+    tx:(CX-closedCenter)*amount,ty:-20*smooth((amount-.72)/.28)};
+}
+function drawBridgeFold(bridge,amount) {
+  coverMotion.amount=amount;
+  if(amount<=1e-6){ctx.drawImage(bridge.paper,0,0,W,H);return;}
+  if(amount>=1-1e-6){drawCoverScene();bridge.drawTabs?.(1);return;}
+  const pose=bridgeCoverPose(bridge.edge,amount),{points,source,side}=pose;
+  ctx.save();ctx.translate(pose.tx,pose.ty);
+  // Keep all exposed paper, writing and keepsakes in their original renderer.
+  ctx.save();ctx.globalAlpha*=1-smooth((amount-.8)/.2);
+  ctx.beginPath();ctx.rect(-100,-100,W+200,H+200);
+  source.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.clip('evenodd');
+  ctx.drawImage(bridge.paper,0,0,W,H);ctx.restore();
+  const layers=closedBookLayers(points,amount);
+  if(layers.visibility>0){
+    ctx.save();ctx.globalAlpha*=layers.visibility;
+    const far=bridge.edge==='front'?assets.back:assets.front,b=opaqueBounds(far),pb=opaqueBounds(assets.stack);
+    quad(far,[{x:b.left,y:b.top},{x:b.right,y:b.top},{x:b.right,y:b.bottom},{x:b.left,y:b.bottom}],layers.farBoard);
+    path(layers.paper);ctx.fillStyle='#d9a45d';ctx.fill();
+    quad(assets.stack,[{x:pb.left+18,y:pb.top+3},{x:pb.right-18,y:pb.top+3},{x:pb.right-18,y:pb.bottom-3},{x:pb.left+18,y:pb.bottom-3}],layers.paper);
+    ctx.restore();
+  }
+  if(amount<.5)quad(bridge.paper,source,points);
+  else {
+    const image=bridge.edge==='front'?assets.front:assets.back,b=opaqueBounds(image),u0=side<0?b.left:b.right,u1=side<0?b.right:b.left;
+    const width=(10+pageCount*.15)*smooth((amount-.5)/.5),spine=assets.closedSpine;
+    quad(spine,[{x:side<0?0:spine.width,y:0},{x:side<0?spine.width:0,y:0},{x:side<0?spine.width:0,y:spine.height},{x:side<0?0:spine.width,y:spine.height}],
+      [{x:points[0].x+side*width,y:points[0].y},points[0],points[3],{x:points[3].x+side*width,y:points[3].y}]);
+    quad(image,[{x:u0,y:b.top},{x:u1,y:b.top},{x:u1,y:b.bottom},{x:u0,y:b.bottom}],points);
+    paintCoverCustomization(bridge.edge,points);
+  }
+  ctx.restore();
+  if(amount>.8)bridge.drawTabs?.(smooth((amount-.8)/.2));
+}
+function startCoverBridge(edge,closing,sourceScene) {
+  const stage=document.querySelector('.book-stage'),originalStyle=stage.style.cssText;
+  const startRect=sourceScene?.rect||stage.getBoundingClientRect();
+  let scene=sourceScene||(!closing&&closed3DActive()?captureClosedScene():null);
+  if(!scene)scene=bookReturnScene?.selected===(activeBookId||'current-unsaved')?bookReturnScene:defaultClosedScene(edge);
+  // Read the live cover configuration when returning, without moving its stack.
+  scene={...scene,models:scene.models.map(m=>m.id===(activeBookId||'current-unsaved')?{...m,book:current3DBook(),height:25+pageCount*.7}:{...m})};
+  if(closing&&!scene.table&&!scene.spine){scene.edge=edge;if((scene.pitch<0)!==(edge==='back'))scene.pitch=-scene.pitch;}
+  if(!closing)bookReturnScene=scene;
+  const resumeAuto=!closing&&$('#autoplay').getAttribute('aria-pressed')==='true';
+  stopAuto();drag=null;closedBooks3D.gesture=null;closedBooks3D.dragTarget=null;
+  bookTableMode=false;spineView=false;closedEdge=null;spread=edge==='front'?0:spreadCount()-1;
+  draw();const paper=spriteSurface(W,H);paper.getContext('2d').imageSmoothingEnabled=false;paper.getContext('2d').drawImage(canvas,0,0,W,H);
+  if(closing)restoreClosedScene(scene);
+  updateControls();const endRect=stage.getBoundingClientRect();
+  bookTableMode=false;spineView=false;closedEdge=null;
+  const virtual=new ClosedBooks3D({canvas,context:ctx,materials:closedMaterials,changed:()=>{}});
+  Object.assign(virtual,{models:scene.models.map(m=>({...m})),table:scene.table,mode:scene.mode});
+  virtual.selected=virtual.models.find(m=>m.id===scene.selected)||virtual.models[0];
+  const selected=virtual.selected,initialAngle=selected.angle,targetCenter={x:selected.x,y:selected.y+selected.height/2,z:selected.z};
+  const project=virtual.project.bind(virtual),targetPose=bridgeCoverPose(edge,1),targetLayers=closedBookLayers(targetPose.points,1);
+  const canonical=edge==='front'?targetPose.points:[targetPose.points[1],targetPose.points[0],targetPose.points[3],targetPose.points[2]];
+  const bridge={edge,closing,paper,progress:0,virtual,scene,morph:0,align:0,phase:'3d',
+    draw(){
+      const q=closing?1-this.progress:this.progress;
+      if(q>=.45){this.phase='hinge';drawBridgeFold(this,1-sine((q-.45)/.55));return;}
+      this.phase='3d';this.align=sine(q/.2);this.morph=sine((q-.2)/.25);
+      virtual.yaw=mix(scene.yaw,Math.round(scene.yaw/(Math.PI*2))*Math.PI*2,this.align);
+      virtual.pitch=mix(scene.pitch,edge==='back'?-1.2:1.2,this.align);virtual.distance=mix(scene.distance,1050,this.align);
+      virtual.center={x:mix(scene.center.x,targetCenter.x,this.align),y:mix(scene.center.y,targetCenter.y,this.align),z:mix(scene.center.z,targetCenter.z,this.align)};
+      selected.angle=mix(initialAngle,0,this.align);virtual.floorOpacity=1-this.align;virtual.lightStrength=1-this.morph;
+      virtual.noSelection=q>0;virtual.faceOpacity=face=>face.model===selected?1:1-this.align;
+      const blend=smooth((this.morph-.75)/.25);
+      ctx.save();ctx.globalAlpha*=1-blend;virtual.draw();ctx.restore();
+      if(blend>0){ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.globalCompositeOperation='lighter';ctx.globalAlpha*=blend;ctx.drawImage(this.closedNative,0,0);ctx.restore();}
+    }};
+  virtual.project=world=>{
+    const base=project(world);if(virtual.projectedModel!==selected||bridge.morph<=0)return base;
+    const dx=world.x-selected.x,dz=world.z-selected.z,c=Math.cos(selected.angle),s=Math.sin(selected.angle);
+    const x=dx*c-dz*s,z=dx*s+dz*c,u=(x+selected.width/2)/selected.width,v=edge==='front'?(z+selected.length/2)/selected.length:(selected.length/2-z)/selected.length;
+    const at=bilerp(canonical,u,v),depth=edge==='front'?(selected.height-(world.y-selected.y))/selected.height:(world.y-selected.y)/selected.height;
+    return {x:mix(base.x,at.x+targetPose.tx,bridge.morph),y:mix(base.y,at.y+targetPose.ty+depth*(targetLayers.depth+5),bridge.morph),depth:base.depth};
+  };
+  bridge.drawTabs=alpha=>{
+    const oldMorph=bridge.morph,oldAngle=selected.angle;
+    bridge.morph=1;selected.angle=0;virtual.yaw=0;virtual.pitch=edge==='back'?-1.2:1.2;virtual.distance=1050;virtual.center=targetCenter;
+    virtual.floorOpacity=0;virtual.lightStrength=0;virtual.noSelection=true;virtual.faceOpacity=face=>face.bookmarkPage!==undefined?alpha:0;
+    virtual.draw();bridge.morph=oldMorph;selected.angle=oldAngle;
+  };
+  // Composite the material hand-off as whole premultiplied layers. Individual
+  // legacy drawing routines set alpha internally and must not bypass the mix.
+  bridge.closedNative=spriteSurface(canvas.width,canvas.height);
+  ctx.clearRect(0,0,W,H);coverMotion={edge,amount:1};drawCoverScene();
+  bridge.drawTabs(1);
+  bridge.closedNative.getContext('2d').drawImage(canvas,0,0);
+  coverMotion={edge,amount:closing?0:1,bridge};updateControls();
+  document.body.classList.add('book-transitioning');
+  const main=document.querySelector('main'),wasInert=main.inert;main.inert=true;
+  const place=t=>{stage.style.cssText=originalStyle;Object.assign(stage.style,{position:'fixed',margin:'0',zIndex:'20',
+    left:mix(startRect.x,endRect.x,t)+'px',top:mix(startRect.y,endRect.y,t)+'px',width:mix(startRect.width,endRect.width,t)+'px'});};
+  place(0);draw();
+  const start=performance.now(),duration=matchMedia('(prefers-reduced-motion: reduce)').matches?120:Math.max(850,Number($('#speed').value)*1.4+500);
+  bridge.start=start;bridge.duration=duration;
+  const frame=now=>{
+    const t=clamp((now-start)/duration);bridge.progress=t;place(sine(t));draw();
+    if(t<1){raf=requestAnimationFrame(frame);return;}
+    coverMotion=null;raf=0;if(closing)restoreClosedScene(scene);else {bookTableMode=false;spineView=false;closedEdge=null;}
+    stage.style.cssText=originalStyle;main.inert=wasInert;document.body.classList.remove('book-transitioning');updateControls();draw();
+    if(!closing&&Number.isInteger(scene.openTarget)){navigateToChapter(scene.openTarget);return;}
+    if(resumeAuto){$('#autoplay').setAttribute('aria-pressed','true');autoTimer=setTimeout(()=>begin(autoDirection),550);}
+  };raf=requestAnimationFrame(frame);return true;
 }
 function toggleBookTable(){
   if(motion||coverMotion||spineMotion||closedFlipMotion)return;
+  if(bookTableMode){open3DBook();return;}
   stopAuto();bookTableMode=!bookTableMode;spineView=false;closedEdge=null;closedSceneKey='';
   $('#shelf').close();updateControls();draw();update3DControls();
 }

@@ -7,6 +7,7 @@ header { text-align:center; position:relative; z-index:1; height:0; overflow:hid
 header span { font:10px/1.5 monospace; letter-spacing:.35em; color:#8e7c62; }
 h1 { font-size:24px; font-weight:400; letter-spacing:.055em; margin:7px 0 0; }
 .book-stage { position:relative; width:min(100%,calc((100svh - 145px)*1.47)); margin:0 auto -22px; }
+body.book-transitioning main { pointer-events:none; }
 main:has(.book-options[open]) .book-stage { width:min(100%,calc((100dvh - 288px)*1.47)); }
 main:has(.content-editor[open]) .book-stage { width:min(100%,calc((100dvh - 555px)*1.47)); }
 canvas { display:block; width:100%; height:auto; image-rendering:pixelated; touch-action:none; cursor:grab; outline:none; }

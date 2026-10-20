@@ -78,25 +78,36 @@ class ClosedBooks3D {
     this.settle();this.save();this.reset();
   }
   rotateBook(amount) {if(!this.selected)return;this.selected.angle+=amount;this.settle(this.selected);this.save();this.changed();}
-  hit(p) {
+  hitFace(p) {
     for(const face of [...this.faces].reverse()){
       const points=face.screen;let inside=false;
       for(let i=0,j=points.length-1;i<points.length;j=i++){
         const a=points[i],b=points[j];if(((a.y>p.y)!==(b.y>p.y))&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)inside=!inside;
       }
-      if(inside)return face.model;
+      if(inside&&this.opaqueFaceHit(face,p))return face;
     }
     return null;
   }
+  hit(p){return this.hitFace(p)?.model||null;}
+  opaqueFaceHit(face,point) {
+    if(!face.triUV)return true;
+    const [a,b,c]=face.screen,det=(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+    const u=((point.x-a.x)*(c.y-a.y)-(point.y-a.y)*(c.x-a.x))/det,v=((b.x-a.x)*(point.y-a.y)-(b.y-a.y)*(point.x-a.x))/det;
+    this.alphaCache??=new WeakMap();let data=this.alphaCache.get(face.texture);
+    if(!data){const c=document.createElement('canvas');c.width=face.texture.width;c.height=face.texture.height;const p=c.getContext('2d');p.drawImage(face.texture,0,0);data=p.getImageData(0,0,c.width,c.height).data;this.alphaCache.set(face.texture,data);}
+    const [A,B,C]=face.triUV,x=Math.floor(A.x+u*(B.x-A.x)+v*(C.x-A.x)),y=Math.floor(A.y+u*(B.y-A.y)+v*(C.y-A.y));
+    return x>=0&&y>=0&&x<face.texture.width&&y<face.texture.height&&data[(y*face.texture.width+x)*4+3]>=64;
+  }
   pointerDown(p) {
-    const hit=this.hit(p);if(hit)this.selected=hit;
+    const face=this.hitFace(p),hit=face?.model;if(hit)this.selected=hit;
     this.dragTarget=this.target();
     const move=this.table&&this.mode==='move'&&hit;
-    this.gesture={p,yaw:this.yaw,pitch:this.pitch,move,hit,start:move?this.ground(p,hit.y+hit.height):null,x:hit?.x,z:hit?.z};
+    this.gesture={p,yaw:this.yaw,pitch:this.pitch,move,hit,bookmarkPage:face?.bookmarkPage,moved:false,start:move?this.ground(p,hit.y+hit.height):null,x:hit?.x,z:hit?.z};
     this.changed();return true;
   }
   pointerMove(p) {
     const g=this.gesture;if(!g)return;
+    if(Math.hypot(p.x-g.p.x,p.y-g.p.y)>4)g.moved=true;
     if(g.move&&g.start){
       const target=this.ground(p,g.hit.y+g.hit.height);
       if(target){g.hit.x=Math.max(-1800,Math.min(1800,g.x+target.x-g.start.x));g.hit.z=Math.max(-1800,Math.min(1800,g.z+target.z-g.start.z));}
@@ -110,15 +121,18 @@ class ClosedBooks3D {
     const g=this.gesture;if(!g)return;
     if(g.move){if(cancel)Object.assign(g.hit,{x:g.x,z:g.z});this.settle(cancel?null:g.hit);this.save();}
     this.gesture=null;this.dragTarget=null;this.changed();
+    if(!cancel&&!g.moved&&Number.isInteger(g.bookmarkPage))this.open?.(g.bookmarkPage);
   }
   zoom(delta) {this.distance=Math.max(650,Math.min(3400,this.distance*Math.exp(delta*.001)));this.changed();}
   poly(points,color,alpha=1) {
-    const p=this.ctx;p.save();p.globalAlpha=alpha;p.beginPath();points.forEach((v,i)=>i?p.lineTo(v.x,v.y):p.moveTo(v.x,v.y));p.closePath();p.fillStyle=color;p.fill();p.restore();
+    const p=this.ctx;p.save();p.globalAlpha*=alpha;p.beginPath();points.forEach((v,i)=>i?p.lineTo(v.x,v.y):p.moveTo(v.x,v.y));p.closePath();p.fillStyle=color;p.fill();p.restore();
   }
   textured(face) {
+    this.projectedModel=face.model;
     const {ctx:p}=this,texture=face.texture;
     this.poly(face.screen,face.color);
-    if(texture){
+    if(texture&&face.triUV)this.triangle(texture,face.triUV,face.screen);
+    else if(texture){
       const b=face.uv||{x:0,y:0,w:texture.width,h:texture.height};
       const steps=face.kind==='cover'?8:4;
       const at=(u,v)=>{
@@ -134,8 +148,9 @@ class ClosedBooks3D {
         this.triangle(texture,[src[0],src[2],src[3]],[dst[0],dst[2],dst[3]]);
       }
     }
+    if(face.kind==='bookmark')return;
     const light={x:-.3,y:.86,z:.42},shade=.08+.23*(1-Math.max(0,this.dot(face.normal,light)));
-    this.poly(face.screen,'#080b10',shade);
+    this.poly(face.screen,'#080b10',shade*(this.lightStrength??1));
     p.save();p.strokeStyle='rgba(0,0,0,.35)';p.lineWidth=.7;p.beginPath();face.screen.forEach((v,i)=>i?p.lineTo(v.x,v.y):p.moveTo(v.x,v.y));p.closePath();p.stroke();p.restore();
   }
   triangle(image,src,dst) {
@@ -147,22 +162,23 @@ class ClosedBooks3D {
     p.transform(u/det,s/det,v/det,t/det,A.x-(u*a.x+v*a.y)/det,A.y-(s*a.x+t*a.y)/det);p.drawImage(image,0,0);p.restore();
   }
   draw() {
-    const p=this.ctx;this.faces=[];
+    const p=this.ctx;this.faces=[];this.projectedModel=null;
     const target=this.dragTarget||this.target();
     // Floor and contact shadows establish scale without flattening the books.
     if(this.table||this.pitch>0){
       const floor=[[-1400,-1200],[1400,-1200],[1400,1700],[-1400,1700]].map(([x,z])=>this.project({x:x+target.x,y:-3,z:z+target.z}));
-      this.poly(floor,'#182023',.5);
-      for(const m of this.models){const outline=[];for(let i=0;i<40;i++){const a=i*Math.PI/20;outline.push(this.project(this.world({...m,y:0},Math.cos(a)*210,-1,Math.sin(a)*285)));}this.poly(outline,'#000',.30);}
+      this.poly(floor,'#182023',.5*(this.floorOpacity??1));
+      for(const m of this.models){const outline=[];for(let i=0;i<40;i++){const a=i*Math.PI/20;outline.push(this.project(this.world({...m,y:0},Math.cos(a)*210,-1,Math.sin(a)*285)));}this.poly(outline,'#000',.30*(this.floorOpacity??1));}
     }
     const basis=this.basis(),eye={x:target.x+basis.toward.x*this.distance,y:target.y+basis.toward.y*this.distance,z:target.z+basis.toward.z*this.distance};
     for(const m of this.models){
+      this.projectedModel=m;
       const material=this.materials(m.book),w=m.width/2,l=m.length/2,h=m.height,board=5,paper=h-board*2;
-      const add=(vertices,normal,texture,color,kind='edge',uv=null)=>{
-        const world=vertices.map(v=>this.world(m,...v)),n=this.normal(m,normal),center=world.reduce((a,v)=>({x:a.x+v.x/4,y:a.y+v.y/4,z:a.z+v.z/4}),{x:0,y:0,z:0});
+      const add=(vertices,normal,texture,color,kind='edge',uv=null,triUV=null,bookmarkPage=undefined)=>{
+        const world=vertices.map(v=>this.world(m,...v)),n=this.normal(m,normal),center=world.reduce((a,v)=>({x:a.x+v.x/vertices.length,y:a.y+v.y/vertices.length,z:a.z+v.z/vertices.length}),{x:0,y:0,z:0});
         if(this.dot(n,{x:eye.x-center.x,y:eye.y-center.y,z:eye.z-center.z})<=0)return;
         const screen=world.map(v=>this.project(v));if(screen.some(v=>v.depth<80))return;
-        this.faces.push({model:m,world,screen,normal:n,texture,color,kind,uv,depth:screen.reduce((a,v)=>a+v.depth/4,0)});
+        this.faces.push({model:m,world,screen,normal:n,texture,color,kind,uv,triUV,bookmarkPage,depth:screen.reduce((a,v)=>a+v.depth/screen.length,0)});
       };
       add([[-w,h,-l],[w,h,-l],[w,h,l],[-w,h,l]],[0,1,0],material.front,material.leather,'cover');
       add([[-w,0,l],[w,0,l],[w,0,-l],[-w,0,-l]],[0,-1,0],material.back,material.leather,'cover');
@@ -176,10 +192,27 @@ class ClosedBooks3D {
       add([[-x,board+paper,z],[x,board+paper,z],[x,board,z],[-x,board,z]],[0,0,1],material.paper,'#bf965d','paper',material.paperUV);
       add([[x,board+paper,-z],[-x,board+paper,-z],[-x,board,-z],[x,board,-z]],[0,0,-1],material.paper,'#bf965d','paper',material.paperUV);
       add([[-w,h,-l],[-w,0,-l],[-w,0,l],[-w,h,l]],[-1,0,0],material.spine,material.leather,'spine');
+      for(const mark of material.bookmarks||[]){
+        const width=128*208/180*mark.size/400*m.width,height=96*164/136*mark.size/350*m.length;
+        const angle=mark.rotation*(mark.page%2?-1:1),c=Math.cos(angle),s=Math.sin(angle);
+        const y=board+(1-mark.depthFraction)*paper;
+        let polygon=[[-.5,-.5],[.5,-.5],[.5,.5],[-.5,.5]].map(([u,v])=>({x:-w+mark.u*m.width+u*width*c-v*height*s,z:-l+mark.v*m.length+u*width*s+v*height*c,u:u+.5,v:v+.5}));
+        const distance=p=>mark.edge==='top'?-l-p.z:mark.edge==='bottom'?p.z-l:p.x-w;
+        const clipped=[];
+        for(let i=0;i<polygon.length;i++){
+          const a=polygon[i],b=polygon[(i+1)%polygon.length],A=distance(a),B=distance(b);
+          if(A>=0)clipped.push(a);
+          if((A>=0)!==(B>=0)){const t=A/(A-B);clipped.push({x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t,u:a.u+(b.u-a.u)*t,v:a.v+(b.v-a.v)*t});}
+        }
+        for(let i=1;i<clipped.length-1;i++)for(const normal of [[0,1,0],[0,-1,0]]){
+          const triangle=[clipped[0],clipped[i],clipped[i+1]],front=(normal[1]>0)!==!!(mark.page%2),texture=front?mark.front:mark.back;
+          add(triangle.map(p=>[p.x,y,p.z]),normal,texture,'rgba(0,0,0,0)','bookmark',null,triangle.map(p=>({x:p.u*texture.width,y:p.v*texture.height})),mark.page);
+        }
+      }
     }
     this.faces.sort((a,b)=>b.depth-a.depth);
-    for(const face of this.faces)this.textured(face);
-    if(this.table&&this.selected){
+    for(const face of this.faces){p.save();p.globalAlpha*=this.faceOpacity?.(face)??1;this.textured(face);p.restore();}
+    if(this.table&&this.selected&&!this.noSelection){
       const m=this.selected,outline=[[-166,-231],[166,-231],[166,231],[-166,231]].map(([x,z])=>this.project(this.world(m,x,m.height+1,z)));
       p.save();p.strokeStyle='#cbb580';p.lineWidth=1.5;p.setLineDash([5,5]);p.beginPath();outline.forEach((v,i)=>i?p.lineTo(v.x,v.y):p.moveTo(v.x,v.y));p.closePath();p.stroke();p.restore();
     }

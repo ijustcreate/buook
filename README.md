@@ -10,7 +10,7 @@ No installation or account is required. The browser version uses the same book r
 
 The approved working checkpoint is **v1.0.11**. The app displays **Pixel Book**; Windows installers/executables retain their legacy **The Book** identifier. The application ID and save location are intentionally unchanged so existing books keep working.
 
-The current development version is **v1.0.14**, adding rotatable 3D closed books and a persistent book-stacking table while keeping the open-book page turns. The `v1.0.11` checkpoint is preserved unchanged. The project was originally called `buook`; the existing web address and desktop profile are retained to preserve saved books.
+The current development version is **v1.0.15**, adding continuous 3D/open cover transitions, artwork-accurate insert picking, gutter contact and persistent clickable edge bookmarks. The `v1.0.11` checkpoint is preserved unchanged. The project was originally called `buook`; the existing web address and desktop profile are retained to preserve saved books.
 
 ## Inspiration and credit
 
@@ -43,6 +43,8 @@ These are unsigned Windows builds. Windows may show a publisher/reputation warni
 
 Close a book or choose **View spine**, then drag to rotate it freely. Scroll to zoom; double-click or choose **Open selected book** to return to the original animated pages. Arrow keys orbit; Enter opens; +/− zoom.
 
+Opening moves the selected 3D book into reading position and hinges its cover into the existing page view. Closing reverses the motion and restores its original camera/table placement. The page-turn mesh remains unchanged.
+
 Choose **3D book table** (also available as **Arrange in 3D** on the shelf) to arrange the current book and saved shelf books. **Rotate view** orbits the camera. **Move books** lets you drag a selected book onto another to stack, or away to separate. The ↶/↷ Book buttons (or Q/E) rotate the selected book on the table. **Stack all**, **Spread out**, and **Reset view** offer quick arrangements. **Add current copy** saves an actual copy to your shelf, not a temporary demo object. Table positions and rotations survive reloads. Stacks snap into place and settle when a support is removed; this is not a rigid-body physics sandbox.
 
 ### How inserts behave
@@ -52,6 +54,14 @@ A photo starts on one specific page face. It follows that face as the sheet lift
 When a loose insert finishes a turn, ownership transfers to the page or inside cover that was facing it **before** the turn—not to the back of the turning sheet. The landed sheet can cover it. Lifting that sheet away reveals it on its new support. Turning that newly supporting page carries the photo again.
 
 Taped inserts stay anchored to their original page face, like artwork on that page. Dragging loose inserts preserves their angle and the grabbed point.
+
+Transparent artwork margins do not intercept clicks. A loose card spanning the gutter is pushed aside by contact with the turning sheet rather than floating above it; canceling the turn restores its original support.
+
+### Edge bookmarks
+
+Drag an insert so it protrudes past a top, bottom or outside page edge. It becomes an edge bookmark associated with that page, retaining its edge position, angle and depth in the paper stack as you turn other pages. Only its exposed tip is clickable while tucked into the stack. Click it to quickly flip to its associated page; a closed 3D book opens first, then flips there. Drag a bookmark fully back onto a visible page to remove its edge-bookmark behavior.
+
+Edge bookmarks, including custom notes, survive reloads and are included when saving a book to the shelf. Their tips also appear on closed 3D books. This persistence applies to bookmarks; ordinary loose-insert simulation remains session-local.
 
 ## Run from source
 
@@ -85,7 +95,7 @@ Generated installers and portable builds go into `release/`, which is excluded f
 
 On Windows, the installed app keeps its Electron profile under `%APPDATA%\The Book`. Shelf and book content are stored in that profile's browser storage, not in this repository. Back up the complete profile with the app closed before moving computers or replacing an installation.
 
-The portable executable is not a self-contained book-data backup. Loose-insert positions, tape state, and the live simulation are currently session state; the saved shelf is not a complete snapshot of that simulation.
+The portable executable is not a self-contained book-data backup. Ordinary loose-insert positions, tape state, and the live simulation are currently session state; persisted edge bookmarks are the exception. The saved shelf is not a complete snapshot of every live simulation state.
 
 ## Regression checks
 
@@ -99,6 +109,8 @@ node scripts/verify-stack-edges.cjs
 node scripts/verify-book-layers.cjs
 node scripts/verify-web.cjs http://127.0.0.1:4174/
 node scripts/verify-closed-3d.cjs http://127.0.0.1:4174/
+node scripts/verify-cover-bridge.cjs http://127.0.0.1:4174/
+node scripts/verify-edge-bookmarks.cjs http://127.0.0.1:4174/
 ```
 
 Set `BOOK_ASSERT_PICKUP=1` for first-frame pixel assertions. Set `BOOK_QA_EXE` to a packaged executable to check that build instead of the development app. `BOOK_VISIBILITY_STEPS` controls the insert suite's pixel-sampling density.

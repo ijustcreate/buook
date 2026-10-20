@@ -1,6 +1,6 @@
 {
   "name": "pixel-book",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "private": true,
   "description": "A local, editable keeper's book.",
   "main": "main.cjs",

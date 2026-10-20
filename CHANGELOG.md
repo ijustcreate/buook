@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.15 — 2026-10-19
+
+- Connected closed 3D books and the original reading view with a camera/geometry bridge and a hinged cover, including continuous viewport placement and reverse travel back to the original table position.
+- Preserved exact starting-frame pixels, front/back cover artwork, selected-book identity and stack layout; honored reduced-motion preferences and locked controls during travel.
+- Made taped/loose insert hit testing follow the rendered artwork’s alpha instead of large transparent rectangles.
+- Added lateral page-face contact for loose cards spanning the gutter, with reversible preview and no change to ordinary carry/land rules.
+- Added persistent top/bottom/left/right edge bookmarks with page/edge/angle/stack-depth tracking and exposed-tip hit regions.
+- Kept bookmark tips visible in both paper stacks and closed 3D books; clicking them uses contents-style quick flips to their associated page, opening the book first when needed.
+
 ## 1.0.14 — 2026-10-19
 
 - Renamed the visible project and public GitHub repository to Pixel Book; retained the existing site origin, application ID and save profile.
