@@ -11,10 +11,11 @@ const path = require('node:path');
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('response', response => { if(response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
-  const ready = () => page.waitForFunction(() => document.querySelector('#loading')?.hidden, null, { timeout: 60000 });
+  const ready = async() => {await page.waitForFunction(() => document.querySelector('#loading')?.hidden, null, { timeout: 60000 });await page.evaluate(()=>{$('#shelf').close();$('.reader-tools').open=true;});};
   try {
     await page.goto(url, { waitUntil: 'domcontentloaded' });
     await ready();
+    await page.evaluate(()=>{openSavedBook('starter-keeper');savedBooks=[];localStorage.setItem('keepers-book-shelf-v1','[]');});
     await page.locator('#next').click();
     await page.waitForFunction(() => spread === 1 && !motion);
     await page.locator('#previous').click();

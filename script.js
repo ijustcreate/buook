@@ -22,7 +22,7 @@ const coverSymbolNames=['Fleur-de-lis','Compass rose','Crescent moon','Star comp
   'Knotwork','Hourglass','Moth','Fish','Crown','Anchor','Quill & ink','Acorn','Shell','Diamond sigil',
   'Antlers','Laurel wreath','Autumn tree','Moon & star','North star','Clover','Dragon','Wheat sheaf','Stag','Gilded butterfly'];
 const bookContent=loadBookContent();
-pageCount=clamp(Number(bookContent.pageCount)||28,8,56);
+pageCount=clamp(Number(bookContent.pageCount)||28,8,4096);
 let bookName=bookContent.name||'The Keeper’s Book',activeBookId=localStorage.getItem('keepers-book-active')||'';
 let savedBooks=loadBookShelf(),editMode=false,selectedPageImage=-1,pixelMode='art',drawingState=null;
 const textures = new Map();
@@ -55,6 +55,8 @@ async function load() {
     return;
   }
   try {
+    await loadStarterLibrary();
+    seedStarterBooks();
     await Promise.all(Object.entries({
       board:'inside-board-v3.png',binding:'open-spine-v3.png',stack:'page-stack-v2.png',leather:'leather-stack-v2.png',
       a:'page-a-v2.png', b:'page-b-v2.png', c:'page-c-v2.png',
@@ -71,11 +73,11 @@ async function load() {
     $('#inside-color').value=bookContent.palette.inside;
     $('#metal-color').value=bookContent.palette.metal;
     applyBookPalette(false);
-    restoreEdgeBookmarks();
+    resetSessionInserts();restoreEdgeBookmarks();
     loaded = true;
     $('#book-name').value=bookName;
     loading.hidden = true;
-    updateControls(); draw();
+    closedEdge='front';updateControls(); draw();renderShelf();$('#shelf').showModal();
   } catch(error) {
     loading.replaceChildren(
       document.createTextNode(`A book sprite could not be loaded (${error.message}). `),
@@ -143,7 +145,7 @@ const entries = [
 function loadBookContent() {
   try {
     const saved=JSON.parse(localStorage.getItem(contentKey)||'{}');
-    return {name:saved.name||'The Keeper’s Book',pageCount:saved.pageCount||28,pages:saved.pages||{},edgeBookmarks:Array.isArray(saved.edgeBookmarks)?saved.edgeBookmarks:[],covers:{front:{},back:{},...(saved.covers||{})},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold',...(saved.palette||{})}};
+    return {starterId:saved.starterId||null,name:saved.name||'The Keeper’s Book',pageCount:saved.pageCount||28,pages:saved.pages||{},edgeBookmarks:Array.isArray(saved.edgeBookmarks)?saved.edgeBookmarks:[],covers:{front:{},back:{},...(saved.covers||{})},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold',...(saved.palette||{})}};
   } catch { return {name:'The Keeper’s Book',pageCount:28,pages:{},covers:{front:{},back:{}},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold'}}; }
 }
 
@@ -273,7 +275,7 @@ function paperBottomV(number,side,u) {
 function viewport(number) {
   const blank = $('#blank').checked;
   const hand=$('#hand').value;
-  const entry = entries[number%entries.length],custom=bookContent.pages[number]||{};
+  const entry = entries[number%entries.length],custom=bookPage(number);
   const key = number+':'+blank+':'+hand+':'+$('#margin-note').value+':'+JSON.stringify(custom);
   if(textures.has(key)) return textures.get(key);
   const surface = document.createElement('canvas');
@@ -288,7 +290,11 @@ function viewport(number) {
   if(!blank) {
     const font=custom.font||'pixel',inkColor=custom.ink||'#5b3e2d';
     const role=pageRole(number),title=custom.title??entry[1];
-    if(role==='contents') {
+    if(custom.novel){
+      p.fillStyle=inkColor;p.font='12px Georgia';p.textBaseline='top';
+      String(custom.body||'').split('\n').forEach((line,i)=>p.fillText(line,45,42+i*15));
+      drawPageNumber(p,number,custom.pageNumberPlacement||'bottom-center',hand);
+    } else if(role==='contents') {
       p.fillStyle=inkColor;ink(p,'CONTENTS',45,31,1.05,hand);
       drawPageText(p,'Between these pages',45,63,304,font==='pixel'?'serif':font,20,inkColor,25);
       p.fillStyle='#ae9160';p.fillRect(45,111,304,1);
@@ -329,6 +335,7 @@ function viewport(number) {
     p.save();p.strokeStyle='rgba(139,92,48,.72)';p.lineWidth=1;p.setLineDash([3,3]);
     p.strokeRect(38,54,324,72);p.strokeRect(38,144,324,150);p.restore();
   }
+  if(textures.size>=24)textures.delete(textures.keys().next().value);
   textures.set(key,surface); return surface;
 }
 
@@ -370,15 +377,19 @@ function navigateToChapter(target) {
   const destination=Math.ceil(target/2);
   closedEdge=null;coverMotion=null;spineView=false;spineMotion=null;motion=null;drag=null;queuedTurns=[];
   if(spread===destination){updateControls();draw();return;}
-  const direction=destination>spread?1:-1,steps=Math.abs(destination-spread);
+  const direction=destination>spread?1:-1;
+  // Long novels skim a few physical turns instead of animating hundreds.
+  if(Math.abs(destination-spread)>8)spread=destination-direction*8;
+  const steps=Math.abs(destination-spread);
   queuedTurns=Array(Math.max(0,steps-1)).fill(direction);
   if(begin(direction,true))settle(true,78);
 }
 
 const defaultSections={2:'The road',4:'Field notes',8:'The reedbeds',12:'Pack & provisions',18:'The old mill',24:'Unfinished business'};
-function pageRole(number){const custom=bookContent.pages[number]||{};return custom.role||(number===0?'title':number===1?'contents':defaultSections[number]?'section':'body');}
+function bookPage(number){return bookContent.pages[number]||starterLibrary.get(bookContent.starterId)?.pages[number]||{};}
+function pageRole(number){const custom=bookPage(number);return custom.role||(number===0?'title':number===1?'contents':defaultSections[number]?'section':'body');}
 function automaticFolio(number){let count=0;for(let i=0;i<=number;i++)if(pageRole(i)!=='title'&&pageRole(i)!=='contents')count++;return count;}
-function sectionPages(){return Array.from({length:pageCount},(_,page)=>({page,role:pageRole(page),label:(bookContent.pages[page]||{}).tocLabel||((bookContent.pages[page]||{}).title||entries[page%entries.length][1]).replace(/\n/g,' ')})).filter(x=>x.role==='section');}
+function sectionPages(){return Array.from({length:pageCount},(_,page)=>({page,role:pageRole(page),label:bookPage(page).tocLabel||(bookPage(page).title||entries[page%entries.length][1]).replace(/\n/g,' ')})).filter(x=>x.role==='section');}
 
 function getUserImage(source,number) {
   if(!source)return null;
@@ -415,7 +426,7 @@ function drawDoodle(p,number,hand) {
 function litViewport(number,chain,side,turnShade=0) {
   const base=viewport(number);
   if(!shadedTextures.has(number)) {
-    const c=document.createElement('canvas');c.width=PAGE_W;c.height=PAGE_H;shadedTextures.set(number,c);
+    const c=document.createElement('canvas');c.width=PAGE_W;c.height=PAGE_H;if(shadedTextures.size>=24)shadedTextures.delete(shadedTextures.keys().next().value);shadedTextures.set(number,c);
   }
   const surface=shadedTextures.get(number),p=surface.getContext('2d');
   p.clearRect(0,0,PAGE_W,PAGE_H);p.drawImage(base,0,0);
@@ -438,9 +449,11 @@ const pageBlockDepth=amount=>{
   // has no underlying block; the second leaf introduces the first layer.
   return 34*clamp((clamp(amount)*leaves-1)/(leaves-1))*pageThickness();
 };
-const layerDepth=(amount,u)=>pageBlockDepth(amount)*mix(.22,1,smooth(u/.24));
+const bindingRoll=amount=>smooth((clamp(amount)-.78)/.22);
+const bindingRise=(amount,u)=>mix(smooth(u/.24),Math.sin(Math.PI/2*clamp(u/.32)),bindingRoll(amount));
+const layerDepth=(amount,u)=>pageBlockDepth(amount)*mix(.22,1,bindingRise(amount,u));
 
-// One cubic profile controls both the leaf and the block underneath it. The
+// One shared profile controls both the leaf and the block underneath it. The
 // stack sits on the board; adding pages raises its surface rather than pushing
 // a separate side strip down through the corner hardware.
 function resting(side, amount) {
@@ -448,10 +461,13 @@ function resting(side, amount) {
   let x=0;
   for(let i=0;i<SEGMENTS;i++) {
     const u=(i+1)/SEGMENTS;
-    const z=elevationZ(layerDepth(amount,u)+8*smooth(u/.24));
+    const z=elevationZ(layerDepth(amount,u)+8*bindingRise(amount,u));
     const dz=z-chain.at(-1).z,segment=PAGE_W/SEGMENTS;
     x+=Math.sqrt(Math.max(segment*segment*.25,segment*segment-dz*dz));
-    chain.push({x:side*x,z,u});
+    // At a full block the endpaper rolls down into the hinge, with a steep
+    // binding tangent that eases into the flat leaf, rather than a flat seam.
+    const rolledX=u<.32?PAGE_W*.32*(1-Math.cos(Math.PI/2*u/.32)):PAGE_W*u;
+    chain.push({x:side*mix(x,rolledX,bindingRoll(amount)),z,u});
   }
   return chain;
 }
@@ -509,10 +525,11 @@ function project(point,v) {
     y:mix(TOP-elevation*.55,BOTTOM-elevation,perspective.vertical)-state.rise};
 }
 
+const openSpineScale=()=>{const ratio=ClosedBooks3D.thickness(pageCount)/ClosedBooks3D.thickness(28);return clamp(ratio<=1?ratio:Math.sqrt(ratio),.4,2);};
 function bookState() {
   const fraction=clamp((spread+(motion?motion.direction*sine(motion.progress):0))/(spreadCount()-1));
   const coverShift=Math.sin((fraction-.5)*Math.PI)*7;
-  const halfSpine=(512-BOARD_SEAM)/1024*940;
+  const halfSpine=(512-BOARD_SEAM)/1024*940*openSpineScale();
   // At the first/last spread the text block attaches at the corresponding
   // edge of the flexible spine, rather than always at its center.
   const shift=(2*fraction-1)*halfSpine*.975+coverShift*Math.pow(BOARD_SEAM/512,3);
@@ -521,7 +538,11 @@ function bookState() {
 
 function coverPoint(x,y) {
   const s=bookState(),nearSpine=Math.pow(1-Math.abs(x-512)/512,3);
-  const dx=(x/1024-.5)*940;
+  const half=SPINE_END-512,relative=x-512,scale=openSpineScale();
+  // Resize the flexible binding, translating rigid boards with its seams.
+  // This is shared by artwork, hardware, cover hinges and inside inserts.
+  const mapped=Math.abs(relative)<=half?relative*scale:relative+Math.sign(relative)*half*(scale-1);
+  const dx=mapped/1024*940;
   const point={x:CX+dx*(1-.05*(1-y/565))+s.coverShift*nearSpine,y:134+y/565*490-s.rise*nearSpine};
   if(x>BOARD_SEAM&&x<SPINE_END) {
     // A flexible spine between two rigid boards. The cubic bow has zero
@@ -875,7 +896,7 @@ function titledSpine(source=assets.spine,name=bookName,palette=bookContent.palet
 
 function drawSpineView() {
   // The spine, board, and bevel share one camera and the same hinge vertices.
-  const height=430,width=310,depth=30+pageCount*1.2,yaw=.43,pitch=.055,focal=1400;
+  const height=430,width=310,depth=ClosedBooks3D.thickness(pageCount),yaw=.43,pitch=.055,focal=1400;
   const spine=titledSpine(),spineUV=opaqueBounds(spine),boardUV=opaqueBounds(assets.front);
   const camera=(x,y,z)=>{
     const horizontal=x*Math.sin(yaw)+z*Math.cos(yaw),distance=-x*Math.cos(yaw)+z*Math.sin(yaw);
@@ -928,7 +949,7 @@ function pageThickness() {
   // Page-count thickness is bounded: the minimum book still has a visible
   // leaf block, while the maximum grows substantially without doubling the
   // cover geometry or causing the lower corners to protrude.
-  return .34+((pageCount-8)/48)*1.18;
+  return .34+((Math.min(pageCount,56)-8)/48)*1.18+Math.log1p(Math.max(0,pageCount-56)/160)*.12;
 }
 
 function redrawInsideCorner(side) {
@@ -1098,6 +1119,10 @@ const itemMounts=new Map(keepsakes.map(item=>[item.sheet,{
 }]));
 const mountedTextures=new Map();
 function itemState(item){return motion?.gutterContacts?.find(contact=>contact.item===item)?.pose||itemMounts.get(item.sheet);}
+function resetSessionInserts(){
+  for(const state of itemMounts.values())Object.assign(state,{outside:false,pageNumber:99999,taped:false,anchorPage:null});
+  if(!bookContent.starterId)for(const item of keepsakes)Object.assign(itemMounts.get(item.sheet),{frontPage:item.sheet*2,pageNumber:item.sheet*2,back:false,under:false,u:.64,v:.82,rotation:-.07});
+}
 function itemsOnPage(number) {
   if(number < -1 || number > pageCount)return [];
   return allInserts().filter(item=>{
@@ -1541,7 +1566,7 @@ function editablePages() {
 
 function loadPageIntoEditor(number) {
   if(!Number.isInteger(number))return;
-  const base=entries[number%entries.length],custom=bookContent.pages[number]||{};
+  const base=entries[number%entries.length],custom=bookPage(number);
   $('#edit-eyebrow').value=custom.eyebrow??base[0];
   $('#edit-title').value=custom.title??base[1];
   $('#edit-body').value=custom.body??base[2];
@@ -1553,12 +1578,12 @@ function loadPageIntoEditor(number) {
 }
 
 function refreshPageImages(){
-  const images=(bookContent.pages[selectedEditPage]||{}).images||[],list=$('#page-images');
+  const images=bookPage(selectedEditPage).images||[],list=$('#page-images');
   list.replaceChildren(...images.map((image,index)=>{const button=document.createElement('button');button.type='button';button.textContent=`Image ${index+1}`;button.setAttribute('aria-pressed',String(index===selectedPageImage));button.onclick=()=>{selectedPageImage=index;refreshPageImages();};return button;}));
   $('#edit-image-pixels').disabled=selectedPageImage<0;$('#remove-page-image').disabled=selectedPageImage<0;
 }
 
-function currentPage(){return Number.isInteger(selectedEditPage)?(bookContent.pages[selectedEditPage]||(bookContent.pages[selectedEditPage]={})):null;}
+function currentPage(){return Number.isInteger(selectedEditPage)?(bookContent.pages[selectedEditPage]||(bookContent.pages[selectedEditPage]=structuredClone(bookPage(selectedEditPage)))):null;}
 function persistEditedPage(){persistBookContent();textures.clear();draw();}
 
 $('#add-text').onclick=()=>{const text=$('#insert-text').value.trim();if(!text)return;const page=currentPage();if(!page)return;const body=$('#edit-body').value;page.body=body+(body?'\n':'')+text;$('#edit-body').value=page.body;$('#insert-text').value='';saveEditedPage();};
@@ -1582,6 +1607,12 @@ $('#eraser').onclick=e=>{const on=e.currentTarget.getAttribute('aria-pressed')!=
 $('#clear-art').onclick=()=>$('#pixel-art').getContext('2d').clearRect(0,0,400,350);
 $('#save-art').onclick=()=>{const page=currentPage();if(!page)return;const data=$('#pixel-art').toDataURL('image/png');if(pixelMode==='image'&&page.images?.[selectedPageImage])page.images[selectedPageImage].src=data;else page.art=data;persistEditedPage();};
 
+function seedStarterBooks(){
+  if(localStorage.getItem('pixel-book-starters-v1'))return;
+  for(const starter of starterLibrary.values())if(!savedBooks.some(book=>book.id===starter.id))savedBooks.push({...starter,pages:{}});
+  if(!savedBooks.some(book=>book.id==='starter-keeper'))savedBooks.push({id:'starter-keeper',name:'The Keeper’s Book',pageCount:28,pages:{},covers:{front:{},back:{}},palette:{outside:'#65402e',inside:'#c85e68',metal:'gold'}});
+  localStorage.setItem('keepers-book-shelf-v1',JSON.stringify(savedBooks));localStorage.setItem('pixel-book-starters-v1','1');
+}
 function renderShelf(){
   const container=$('#shelf-books');container.replaceChildren();$('#shelf-empty').hidden=savedBooks.length>0;
   savedBooks.forEach(book=>{
@@ -1601,21 +1632,22 @@ function saveBook(copy=false){
   // previous named spine and make the renamed save its own book entry.
   if(book&&book.name!==bookName)book=null;
   if(!book){book={id:crypto.randomUUID(),name:bookName,pageCount,pages:{},covers:{}};savedBooks.push(book);activeBookId=book.id;localStorage.setItem('keepers-book-active',activeBookId);}
-  book.name=bookName;book.pageCount=pageCount;book.pages=structuredClone(bookContent.pages);book.covers=structuredClone(bookContent.covers);book.palette={...bookContent.palette};book.edgeBookmarks=structuredClone(bookContent.edgeBookmarks||[]);book.savedAt=Date.now();
+  book.starterId=bookContent.starterId;book.name=bookName;book.pageCount=pageCount;book.pages=structuredClone(bookContent.pages);book.covers=structuredClone(bookContent.covers);book.palette={...bookContent.palette};book.edgeBookmarks=structuredClone(bookContent.edgeBookmarks||[]);book.savedAt=Date.now();
   localStorage.setItem('keepers-book-shelf-v1',JSON.stringify(savedBooks));persistBookContent();$('#status').textContent='Saved to your shelf.';renderShelf();
 }
 function openSavedBook(id,quiet=false){
   const book=savedBooks.find(entry=>entry.id===id);if(!book)return;
   bookTableMode=false;
-  bookName=book.name;bookContent.name=book.name;bookContent.pageCount=book.pageCount;pageCount=book.pageCount;
+  bookName=book.name;bookContent.starterId=book.starterId||null;bookContent.name=book.name;bookContent.pageCount=book.pageCount;pageCount=book.pageCount;
   bookContent.pages=structuredClone(book.pages||{});bookContent.covers={front:{},back:{},...(book.covers||{})};bookContent.palette={outside:'#9b382d',inside:'#c85e68',metal:'gold',...(book.palette||{})};activeBookId=id;localStorage.setItem('keepers-book-active',id);
   $('#book-name').value=bookName;$('#outside-color').value=bookContent.palette.outside;$('#inside-color').value=bookContent.palette.inside;$('#metal-color').value=bookContent.palette.metal;
-  bookContent.edgeBookmarks=structuredClone(book.edgeBookmarks||[]);restoreEdgeBookmarks();
-  applyBookPalette(false);spread=0;closedEdge=null;motion=null;queuedTurns=[];textures.clear();if(!quiet){updateControls();draw();}$('#shelf').close();persistBookContent();
+  bookContent.edgeBookmarks=structuredClone(book.edgeBookmarks||[]);resetSessionInserts();restoreEdgeBookmarks();
+  applyBookPalette(false);spread=0;closedEdge=null;motion=null;queuedTurns=[];bookReturnScene=null;textures.clear();shadedTextures.clear();if(!quiet){updateControls();draw();}$('#shelf').close();persistBookContent();
 }
 $('#save-book').onclick=()=>saveBook(false);$('#save-copy').onclick=()=>saveBook(true);
 $('#book-name').oninput=()=>{bookName=$('#book-name').value;persistBookContent();draw();};
 $('#shelf-open').onclick=()=>{renderShelf();$('#shelf').showModal();};
+$('#go-page-button').onclick=()=>navigateToChapter(clamp(Number($('#go-page').value)-1,0,pageCount-1));
 $('#close-shelf').onclick=$('#close-shelf-action').onclick=()=>$('#shelf').close();
 ['#outside-color','#inside-color','#metal-color'].forEach(selector=>$(selector).onchange=()=>{
   bookContent.palette.outside=$('#outside-color').value;bookContent.palette.inside=$('#inside-color').value;bookContent.palette.metal=$('#metal-color').value;
@@ -1776,7 +1808,7 @@ $('#spine-view').onclick=animateSpineView;
 $('#edit-page').onchange=e=>{selectedEditPage=Number(e.target.value);loadPageIntoEditor(selectedEditPage);};
 function saveEditedPage() {
   if(!Number.isInteger(selectedEditPage))return;
-  const previous=bookContent.pages[selectedEditPage]||{};
+  const previous=bookPage(selectedEditPage);
   bookContent.pages[selectedEditPage]={...previous,eyebrow:$('#edit-eyebrow').value,title:$('#edit-title').value,body:$('#edit-body').value,
     role:$('#page-role').value,tocLabel:$('#toc-label').value,font:$('#page-font').value,ink:$('#page-ink').value,paper:$('#page-paper').value,pageNumberPlacement:$('#page-number-position').value};
   persistBookContent();textures.clear();draw();
@@ -1801,10 +1833,10 @@ let pageCountInputTimer=0;
 function applyPageCount(input) {
   stopAuto();if(raf)cancelAnimationFrame(raf);
   const requested=Number(input.value);
-  pageCount=Number.isFinite(requested)?clamp(Math.round(requested/2)*2,8,56):28;
+  pageCount=Number.isFinite(requested)?clamp(Math.round(requested/2)*2,8,4096):28;
   motion=null;coverMotion=null;closedEdge=null;drag=null;queuedTurns=[];
   spread=clamp(spread,0,spreadCount()-1);
-  updateControls();draw();
+  persistBookContent();updateControls();draw();
 }
 $('#page-count').oninput=e=>{
   // Number inputs can emit an intermediate digit while someone types (e.g.
@@ -1890,6 +1922,18 @@ canvas.addEventListener('contextmenu',e=>{
   if(!loaded||closedEdge||coverMotion||spineView||spineMotion||motion||!isDeadSpace(p))return;
   e.preventDefault();createLooseInsert(p);
 });
+function insertPlaneCoordinates(item,number,state,p){
+  const side=number%2===0?1:-1,amount=side<0?spread/(spreadCount()-1):1-spread/(spreadCount()-1);
+  const chain=resting(side,amount),width=128*208/180*(item.type==='feather'?3:1);
+  let rx=0,ry=0;
+  for(let i=0;i<8;i++){
+    const q=rigidInsertPoint(chain,side,number,state,rx,ry,width),a=rigidInsertPoint(chain,side,number,state,rx+1,ry,width),b=rigidInsertPoint(chain,side,number,state,rx,ry+1,width);
+    const ax=a.x-q.x,ay=a.y-q.y,bx=b.x-q.x,by=b.y-q.y,det=ax*by-ay*bx;
+    if(Math.abs(det)<.001)break;
+    rx+=((p.x-q.x)*by-(p.y-q.y)*bx)/det;ry+=(ax*(p.y-q.y)-ay*(p.x-q.x))/det;
+  }
+  return {rx,ry};
+}
 canvas.addEventListener('pointerdown',e=>{
   if(spineView||spineMotion)return;
   if(closedEdge){animateCover(closedEdge,false);return;}
@@ -1918,8 +1962,12 @@ canvas.addEventListener('pointerdown',e=>{
       }
       surfaceGrab={rx,ry};
     }
+    const width=128*208/180*(hit.item.type==='feather'?3:1),height=96*164/136*(hit.item.type==='feather'?3:1);
+    const plane=surfaceGrab||{rx:dx,ry:dy},localX=plane.rx*Math.cos(angle)+plane.ry*Math.sin(angle),localY=-plane.rx*Math.sin(angle)+plane.ry*Math.cos(angle);
+    const rotating=e.altKey;
     itemDrag={item:hit.item,pageNumber:hit.pageNumber,startX:p.x,startY:p.y,x:hit.x,y:hit.y,
-      grabX,grabY,surfaceGrab,startRotation:angle,moved:false};
+      grabX,grabY,surfaceGrab,startRotation:angle,rotating,startPointerAngle:Math.atan2(plane.ry,plane.rx),
+      localX,localY,inertia:(width*width+height*height)/12,lastPointer:p,moved:false};
     canvas.setPointerCapture(e.pointerId);canvas.style.cursor='grabbing';draw();return;
   }
   if(Math.abs(p.x-CX)<90)return;
@@ -1931,13 +1979,28 @@ canvas.addEventListener('pointermove',e=>{
   if(itemDrag) {
     const p=point(e),dx=p.x-itemDrag.startX,dy=p.y-itemDrag.startY;
     if(Math.hypot(dx,dy)>5)itemDrag.moved=true;
-    // Translation must not invent a rotation based on which corner was
-    // grabbed. Preserve both the angle and the pointer's pickup offset.
-    const rotation=itemDrag.startRotation,cs=Math.cos(rotation),sn=Math.sin(rotation);
-    itemDrag.x=p.x-(itemDrag.grabX*cs-itemDrag.grabY*sn);
-    itemDrag.y=p.y-(itemDrag.grabX*sn+itemDrag.grabY*cs);
-    const state=itemState(itemDrag.item),center={x:itemDrag.x,y:itemDrag.y};state.rotation=rotation;
-    if(placeLooseItem(itemDrag.item,center,itemDrag.surfaceGrab?{...itemDrag.surfaceGrab,pointer:p}:null))itemDrag.pageNumber=state.pageNumber;
+    if(itemDrag.rotating){
+      const state=itemState(itemDrag.item),plane=state.outside?{rx:p.x-itemDrag.x,ry:p.y-itemDrag.y}:insertPlaneCoordinates(itemDrag.item,itemDrag.pageNumber,state,p);
+      const delta=Math.atan2(plane.ry,plane.rx)-itemDrag.startPointerAngle;
+      state.rotation=itemDrag.startRotation+Math.atan2(Math.sin(delta),Math.cos(delta));
+      canvas.style.cursor='crosshair';draw();return;
+    }
+    // A uniform rectangular lamina pulled at one material point. Torque and
+    // translation share displacement according to distributed inertia. The
+    // final pin constraint keeps that material point under the pointer.
+    const d=itemDrag,state=itemState(d.item),from=d.lastPointer;
+    const steps=Math.max(1,Math.ceil(Math.hypot(p.x-from.x,p.y-from.y)/8));
+    for(let i=1;i<=steps;i++){
+      const pointer={x:mix(from.x,p.x,i/steps),y:mix(from.y,p.y,i/steps)};
+      const c=Math.cos(state.rotation),s=Math.sin(state.rotation),rx=d.localX*c-d.localY*s,ry=d.localX*s+d.localY*c;
+      const target=state.outside?{rx:pointer.x-d.x,ry:pointer.y-d.y}:insertPlaneCoordinates(d.item,d.pageNumber,state,pointer);
+      state.rotation+=(rx*(target.ry-ry)-ry*(target.rx-rx))/(d.inertia+rx*rx+ry*ry);
+      const C=Math.cos(state.rotation),S=Math.sin(state.rotation),grab={rx:d.localX*C-d.localY*S,ry:d.localX*S+d.localY*C,pointer};
+      const center={x:pointer.x-grab.rx,y:pointer.y-grab.ry};
+      if(placeLooseItem(d.item,center,state.outside?null:grab))d.pageNumber=state.pageNumber;
+      d.x=state.outside?state.outsideX:center.x;d.y=state.outside?state.outsideY:center.y;
+    }
+    d.lastPointer=p;
     canvas.style.cursor='grabbing';draw();return;
   }
   if(!drag||!motion){
@@ -1979,7 +2042,10 @@ function closedMaterials(book) {
   const outside=tintCoverSprite(baseAssets.front,'outside',palette);
   const symbols=tintCoverSprite(baseAssets.symbols,'symbols',palette);
   const makeCover=edge=>{
-    const source=edge==='front'?outside:mirroredSprite(outside),bounds=opaqueBounds(source);
+    // Both boards share the same local spine-to-fore-edge orientation. The
+    // back mesh reverses its longitudinal winding, not its width: mirroring
+    // the sprite again puts its corner guards against the spine.
+    const source=outside,bounds=opaqueBounds(source);
     const surface=spriteSurface(400,565),p=surface.getContext('2d');p.imageSmoothingEnabled=false;
     p.drawImage(source,bounds.left,bounds.top,bounds.right-bounds.left,bounds.bottom-bounds.top,0,0,400,565);
     const cover=book.covers?.[edge]||{},title=String(cover.title||'').trim();
@@ -1993,15 +2059,31 @@ function closedMaterials(book) {
       p.strokeStyle='#301c19';p.lineWidth=3;p.strokeText(title,200,v*565);p.fillStyle=palette.metal==='silver'?'#dce6ee':'#f0cd82';p.fillText(title,200,v*565);
     }return surface;
   };
-  const spine=titledSpine(tintCoverSprite(baseAssets.spine,'spine',palette),book.name||'Untitled book',palette);
+  const rawSpine=titledSpine(tintCoverSprite(baseAssets.spine,'spine',palette),book.name||'Untitled book',palette),sb=opaqueBounds(rawSpine);
+  const spine=spriteSurface(sb.right-sb.left,sb.bottom-sb.top);spine.getContext('2d').drawImage(rawSpine,-sb.left,-sb.top);
   const bounds=opaqueBounds(assets.stack);
   const bookmarks=(book.edgeBookmarks||[]).filter(entry=>entry.state?.edgeMark&&entry.item).map(entry=>({
     ...entry.state.edgeMark,u:entry.state.u,v:entry.state.v,rotation:entry.state.rotation,
     size:entry.item.type==='feather'?3:1,front:mountedTexture(entry.item,false,entry.state.taped),back:mountedTexture(entry.item,true,false)}));
-  const result={front:makeCover('front'),back:makeCover('back'),spine,paper:assets.stack,leather:coverInk(.6,palette.outside),bookmarks,
+  const front=makeCover('front'),back=makeCover('back');
+  const result={front,back,profiles:{front:coverSilhouette(front),back:coverSilhouette(back)},spine,paper:assets.stack,leather:coverInk(.6,palette.outside),bookmarks,
     paperUV:{x:bounds.left+18,y:bounds.top+3,w:bounds.right-bounds.left-36,h:bounds.bottom-bounds.top-6}};
   if(closedMaterialCache.size>24)closedMaterialCache.delete(closedMaterialCache.keys().next().value);
   closedMaterialCache.set(key,result);return result;
+}
+function coverSilhouette(texture){
+  const p=texture.getContext('2d'),{width:w,height:h}=texture,data=p.getImageData(0,0,w,h).data;
+  const opaque=(x,y)=>data[(y*w+x)*4+3]>=96,points=[];
+  // Trace the actual outer alpha contour in angular order. Independently
+  // scanned rectangle sides can cross at ornate, asymmetric corner guards.
+  for(let i=0;i<192;i++){
+    const angle=-Math.PI/2+i*Math.PI*2/192,c=Math.cos(angle),s=Math.sin(angle);
+    for(let r=Math.hypot(w,h);r>=0;r--){
+      const x=Math.round((w-1)/2+c*r),y=Math.round((h-1)/2+s*r);
+      if(x>=0&&x<w&&y>=0&&y<h&&opaque(x,y)){points.push({u:x/(w-1),v:y/(h-1)});break;}
+    }
+  }
+  return points;
 }
 const closedBooks3D=new ClosedBooks3D({canvas,context:ctx,materials:closedMaterials,changed:()=>{if(!closedSceneSyncing){draw();update3DControls();}},open:page=>open3DBook(page)});
 function drawClosed3D() {
@@ -2010,8 +2092,7 @@ function drawClosed3D() {
   if(key!==closedSceneKey){
     closedSceneKey=key;closedSceneSyncing=true;
     try{closedBooks3D.setBooks(books,bookTableMode,current.id);}finally{closedSceneSyncing=false;}
-    if(closedEdge==='back'&&!bookTableMode)closedBooks3D.pitch=-1.05;
-    if(spineView&&!bookTableMode)closedBooks3D.yaw=-1.15;
+    if(closedEdge==='back'&&!bookTableMode)closedBooks3D.pitch=-.43;
   }
   for(const model of closedBooks3D.models)model.book=books.find(book=>book.id===model.id)||model.book;
   itemHits=[];closedBooks3D.draw();
@@ -2042,18 +2123,18 @@ let bookReturnScene=null;
 function captureClosedScene() {
   const r=document.querySelector('.book-stage').getBoundingClientRect();
   return {models:closedBooks3D.models.map(m=>({...m,book:structuredClone(m.book)})),selected:closedBooks3D.selected?.id,
-    yaw:closedBooks3D.yaw,pitch:closedBooks3D.pitch,distance:closedBooks3D.distance,center:{...closedBooks3D.target()},
+    yaw:closedBooks3D.yaw,pitch:closedBooks3D.pitch,roll:closedBooks3D.roll,distance:closedBooks3D.distance,center:{...closedBooks3D.target()},
     table:bookTableMode,spine:spineView,edge:closedEdge,mode:closedBooks3D.mode,rect:{x:r.x,y:r.y,width:r.width}};
 }
 function defaultClosedScene(edge) {
   const virtual=new ClosedBooks3D({canvas,context:ctx,materials:closedMaterials,changed:()=>{}});
-  virtual.setBooks([current3DBook()]);virtual.pitch=edge==='back'?-1.05:.85;
-  return {models:virtual.models,selected:virtual.selected.id,yaw:virtual.yaw,pitch:virtual.pitch,distance:virtual.distance,
+  virtual.setBooks([current3DBook()]);virtual.pitch=edge==='back'?-.43:.43;
+  return {models:virtual.models,selected:virtual.selected.id,yaw:virtual.yaw,pitch:virtual.pitch,roll:virtual.roll,distance:virtual.distance,
     center:{...virtual.target()},table:false,spine:false,edge,mode:'orbit'};
 }
 function restoreClosedScene(scene) {
   bookTableMode=scene.table;spineView=scene.spine;closedEdge=scene.edge;
-  Object.assign(closedBooks3D,{models:scene.models.map(m=>({...m})),yaw:scene.yaw,pitch:scene.pitch,distance:scene.distance,
+  Object.assign(closedBooks3D,{models:scene.models.map(m=>({...m})),yaw:scene.yaw,pitch:scene.pitch,roll:scene.roll||0,distance:scene.distance,
     center:{...scene.center},table:scene.table,mode:scene.mode,gesture:null,dragTarget:null});
   closedBooks3D.selected=closedBooks3D.models.find(m=>m.id===scene.selected)||closedBooks3D.models[0];
   const current=current3DBook(),books=bookTableMode?[current,...savedBooks.filter(book=>book.id!==current.id)]:[current];
@@ -2107,7 +2188,7 @@ function startCoverBridge(edge,closing,sourceScene) {
   let scene=sourceScene||(!closing&&closed3DActive()?captureClosedScene():null);
   if(!scene)scene=bookReturnScene?.selected===(activeBookId||'current-unsaved')?bookReturnScene:defaultClosedScene(edge);
   // Read the live cover configuration when returning, without moving its stack.
-  scene={...scene,models:scene.models.map(m=>m.id===(activeBookId||'current-unsaved')?{...m,book:current3DBook(),height:25+pageCount*.7}:{...m})};
+  scene={...scene,models:scene.models.map(m=>m.id===(activeBookId||'current-unsaved')?{...m,book:current3DBook(),height:ClosedBooks3D.thickness(pageCount)}:{...m})};
   if(closing&&!scene.table&&!scene.spine){scene.edge=edge;if((scene.pitch<0)!==(edge==='back'))scene.pitch=-scene.pitch;}
   if(!closing)bookReturnScene=scene;
   const resumeAuto=!closing&&$('#autoplay').getAttribute('aria-pressed')==='true';
@@ -2130,6 +2211,7 @@ function startCoverBridge(edge,closing,sourceScene) {
       this.phase='3d';this.align=sine(q/.2);this.morph=sine((q-.2)/.25);
       virtual.yaw=mix(scene.yaw,Math.round(scene.yaw/(Math.PI*2))*Math.PI*2,this.align);
       virtual.pitch=mix(scene.pitch,edge==='back'?-1.2:1.2,this.align);virtual.distance=mix(scene.distance,1050,this.align);
+      virtual.roll=mix(scene.roll||0,0,this.align);
       virtual.center={x:mix(scene.center.x,targetCenter.x,this.align),y:mix(scene.center.y,targetCenter.y,this.align),z:mix(scene.center.z,targetCenter.z,this.align)};
       selected.angle=mix(initialAngle,0,this.align);virtual.floorOpacity=1-this.align;virtual.lightStrength=1-this.morph;
       virtual.noSelection=q>0;virtual.faceOpacity=face=>face.model===selected?1:1-this.align;
@@ -2146,7 +2228,7 @@ function startCoverBridge(edge,closing,sourceScene) {
   };
   bridge.drawTabs=alpha=>{
     const oldMorph=bridge.morph,oldAngle=selected.angle;
-    bridge.morph=1;selected.angle=0;virtual.yaw=0;virtual.pitch=edge==='back'?-1.2:1.2;virtual.distance=1050;virtual.center=targetCenter;
+    bridge.morph=1;selected.angle=0;virtual.yaw=0;virtual.pitch=edge==='back'?-1.2:1.2;virtual.roll=0;virtual.distance=1050;virtual.center=targetCenter;
     virtual.floorOpacity=0;virtual.lightStrength=0;virtual.noSelection=true;virtual.faceOpacity=face=>face.bookmarkPage!==undefined?alpha:0;
     virtual.draw();bridge.morph=oldMorph;selected.angle=oldAngle;
   };
@@ -2184,8 +2266,8 @@ $('#book-3d-open').onclick=open3DBook;
 $('#book-3d-orbit').onclick=()=>{closedBooks3D.mode='orbit';update3DControls();};
 $('#book-3d-move').onclick=()=>{closedBooks3D.mode='move';update3DControls();};
 $('#book-3d-reset').onclick=()=>closedBooks3D.reset(closedEdge==='back'&&!bookTableMode);
-$('#book-3d-turn-left').onclick=()=>closedBooks3D.rotateBook(-Math.PI/12);
-$('#book-3d-turn-right').onclick=()=>closedBooks3D.rotateBook(Math.PI/12);
+$('#book-3d-turn-left').onclick=()=>closedBooks3D.rotateBook(Math.PI/12);
+$('#book-3d-turn-right').onclick=()=>closedBooks3D.rotateBook(-Math.PI/12);
 $('#book-3d-stack').onclick=()=>closedBooks3D.arrange(true);
 $('#book-3d-spread').onclick=()=>closedBooks3D.arrange(false);
 $('#book-3d-copy').onclick=()=>{saveBook(true);closedSceneKey='';draw();update3DControls();};
@@ -2203,11 +2285,9 @@ document.addEventListener('keydown',event=>{
   if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Enter','+','-','q','e'].includes(event.key)){
     event.preventDefault();event.stopImmediatePropagation();
     if(event.key==='Enter')return open3DBook();
-    if(event.key==='q'||event.key==='e')closedBooks3D.rotateBook(event.key==='q'?-.15:.15);
+    if(event.key==='q'||event.key==='e')closedBooks3D.rotateBook(event.key==='q'?.15:-.15);
     else if(event.key==='+'||event.key==='-')closedBooks3D.zoom(event.key==='+'?-100:100);
-    else {if(event.key==='ArrowLeft')closedBooks3D.yaw-=.15;if(event.key==='ArrowRight')closedBooks3D.yaw+=.15;
-      if(event.key==='ArrowUp')closedBooks3D.pitch=Math.min(1.48,closedBooks3D.pitch+.12);
-      if(event.key==='ArrowDown')closedBooks3D.pitch=Math.max(bookTableMode?.14:-1.48,closedBooks3D.pitch-.12);draw();}
+    else {closedBooks3D.orbitBy(event.key==='ArrowLeft'?-20:event.key==='ArrowRight'?20:0,event.key==='ArrowUp'?-20:event.key==='ArrowDown'?20:0);draw();}
   }
 },true);
 load();

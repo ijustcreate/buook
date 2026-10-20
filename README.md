@@ -10,7 +10,9 @@ No installation or account is required. The browser version uses the same book r
 
 The approved working checkpoint is **v1.0.11**. The app displays **Pixel Book**; Windows installers/executables retain their legacy **The Book** identifier. The application ID and save location are intentionally unchanged so existing books keep working.
 
-The current development version is **v1.0.15**, adding continuous 3D/open cover transitions, artwork-accurate insert picking, gutter contact and persistent clickable edge bookmarks. The `v1.0.11` checkpoint is preserved unchanged. The project was originally called `buook`; the existing web address and desktop profile are retained to preserve saved books.
+The current development version is **v1.0.17**, with shelf-first startup, three starter books (Dracula, Frankenstein and the original Keeper’s Book), up to 4,096 pages, bounded novel thickness, and corner/Alt-drag insert rotation. It restores the upright ornate spine presentation with natural rotation controls, correctly oriented boards, silhouette-following edges and rounded endpaper binding curves. Existing page turns, insert occlusion and clickable edge bookmarks are retained. The `v1.0.11` checkpoint is preserved unchanged. The original `buook` web address and desktop profile remain unchanged to preserve saved books.
+
+The novel text is extracted from the user-supplied public-domain PDFs (509 source pages for Dracula by Bram Stoker; 268 for Frankenstein by Mary Shelley), then repaginated for the parchment viewport. Pixel Book page counts differ from the source PDFs. The PDF text layer is retained; original extraction artifacts may remain. Bundled novel text is read-only base content; your page edits, book copies and shelf stay local. Startup adds missing starter editions once without replacing existing books.
 
 ## Inspiration and credit
 
@@ -53,7 +55,7 @@ A photo starts on one specific page face. It follows that face as the sheet lift
 
 When a loose insert finishes a turn, ownership transfers to the page or inside cover that was facing it **before** the turn—not to the back of the turning sheet. The landed sheet can cover it. Lifting that sheet away reveals it on its new support. Turning that newly supporting page carries the photo again.
 
-Taped inserts stay anchored to their original page face, like artwork on that page. Dragging loose inserts preserves their angle and the grabbed point.
+Taped inserts stay anchored to their original page face, like artwork on that page. Pulling a loose photo near its centre mostly slides it; pulling off-centre blends translation and rotation using rectangular mass inertia. The grabbed material point stays under the pointer. Alt-drag spins in place.
 
 Transparent artwork margins do not intercept clicks. A loose card spanning the gutter is pushed aside by contact with the turning sheet rather than floating above it; canceling the turn restores its original support.
 
@@ -110,6 +112,8 @@ node scripts/verify-book-layers.cjs
 node scripts/verify-web.cjs http://127.0.0.1:4174/
 node scripts/verify-closed-3d.cjs http://127.0.0.1:4174/
 node scripts/verify-cover-bridge.cjs http://127.0.0.1:4174/
+node scripts/verify-spine-presentation.cjs http://127.0.0.1:4174/
+node scripts/verify-library-and-photo.cjs http://127.0.0.1:4174/
 node scripts/verify-edge-bookmarks.cjs http://127.0.0.1:4174/
 ```
 

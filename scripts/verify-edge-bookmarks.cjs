@@ -9,6 +9,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
   const capture=async name=>{const b=await page.evaluate(()=>canvas.toDataURL().split(',')[1]);await fs.writeFile(path.join(output,name+'.png'),Buffer.from(b,'base64'));};
   try{
     if(!profile)await page.goto(process.argv[2]||'http://127.0.0.1:4174/');await page.waitForFunction(()=>loaded,null,{timeout:60000});
+    await page.evaluate(()=>{$('#shelf').close();closedEdge=null;});
     const initial=await page.evaluate(()=>{
       spread=5;for(const item of allInserts())Object.assign(itemMounts.get(item.sheet),{outside:false,pageNumber:99999,taped:false});
       const positions=[{page:10,u:.35,v:0,edge:'top'},{page:10,u:.65,v:1,edge:'bottom'},{page:9,u:1,v:.3,edge:'left'},{page:10,u:1,v:.75,edge:'right'}];
@@ -28,6 +29,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=r
     await page.waitForFunction(target=>spread===Math.ceil(target/2)&&!motion&&!queuedTurns.length,clickable.page,{timeout:15000});
     assert.equal(await page.evaluate(()=>JSON.stringify(bookContent.edgeBookmarks)),initial);
     await page.reload();await page.waitForFunction(()=>loaded);
+    await page.evaluate(()=>{$('#shelf').close();$('.reader-tools').open=true;});
     assert.equal(await page.evaluate(()=>JSON.stringify(bookContent.edgeBookmarks)),initial);
     assert.equal(await page.evaluate(()=>allInserts().filter(item=>itemState(item).edgeMark).length),4);
     await page.evaluate(()=>{bookName='Bookmark shelf test';$('#book-name').value=bookName;saveBook();bookContent.edgeBookmarks=[];restoreEdgeBookmarks();openSavedBook(activeBookId);});

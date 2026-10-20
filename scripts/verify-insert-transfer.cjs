@@ -18,6 +18,7 @@ const os = require('node:os');
     page.on('pageerror', error => errors.push(error.message));
     await app.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.getAllWindows()[0]; window.webContents.setBackgroundThrottling(false); window.hide(); });
     await page.waitForFunction(() => document.querySelector('#loading')?.hidden, null, { timeout: 15000, polling: 100 });
+    await page.evaluate(()=>{$('#shelf').close();closedEdge=null;});
     await page.evaluate(() => {
       pageCount = 28; spread = 0; motion = null;
       Object.assign(itemState(keepsakes[0]), { taped: false, anchorPage: null, pageNumber: 0, back: false, under: false, outside: false, landedSide: null, u: .25, v: .25, rotation: 1.35 });
@@ -209,12 +210,12 @@ const os = require('node:os');
       for(const [dx,dy] of [[15,-10],[40,-25],[25,15]]) {
         await page.mouse.move(pickup.x+dx,pickup.y+dy,{steps:4});
         const result=await page.evaluate(()=>{
-          const s=itemState(keepsakes[0]),g=itemDrag.surfaceGrab,p=rigidInsertPoint(resting(1,1),1,0,s,g.rx,g.ry,128*208/180);
+          const s=itemState(keepsakes[0]),d=itemDrag,c=Math.cos(s.rotation),t=Math.sin(s.rotation),p=rigidInsertPoint(resting(1,1),1,0,s,d.localX*c-d.localY*t,d.localX*t+d.localY*c,128*208/180);
           return {x:p.x,y:p.y,rotation:s.rotation};
         });
         const expected=await page.evaluate(p=>{const r=canvas.getBoundingClientRect();return{x:(p.x-r.left)*W/r.width,y:(p.y-r.top)*H/r.height};},{x:pickup.x+dx,y:pickup.y+dy});
         grabError=Math.max(grabError,Math.hypot(result.x-expected.x,result.y-expected.y));
-        assert.equal(result.rotation,.4,'Dragging invented a rotation');
+        assert(Number.isFinite(result.rotation),'Invalid tug rotation');
       }
       const held=await snapshot('off-center-held-'+offset[0]);await page.mouse.up();
       compare(held,await snapshot('off-center-released-'+offset[0]),'Off-center drop');

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.17 — 2026-10-20
+
+- Start on the local shelf with Dracula, Frankenstein and the original Keeper’s Book; preserve existing shelf entries and seed starter editions only once.
+- Import the supplied novels as reflowed, chapter-linked text; keep immutable base text outside localStorage and support up to 4,096 editable pages with bounded rendering caches.
+- Move reading/navigation actions into collapsed Book controls instead of a permanent link stack.
+- Scale open bindings, cover seams and closed-book thickness for thin notebooks and long novels.
+- Blend loose-photo translation and rotation from a single grabbed material point using rectangular mass inertia, with no pointer slip; Alt-drag remains a fixed-centre spin.
+- Restore the ornate upright spine-first 3D presentation, natural drag directions, readable spine lettering, correctly oriented back-board hardware, alpha-preserving lighting and silhouette-following board edges.
+- Round first/last-page binding rolls and align the underlying paper layers; retain page-turn occlusion, taped/loose ownership and edge bookmarks.
+
 ## 1.0.15 — 2026-10-19
 
 - Connected closed 3D books and the original reading view with a camera/geometry bridge and a hinged cover, including continuous viewport placement and reverse travel back to the original table position.

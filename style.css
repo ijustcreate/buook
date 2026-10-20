@@ -27,6 +27,15 @@ output { font:12px monospace; min-width:126px; text-align:center; letter-spacing
 .close-book[hidden] { display:none; }
 #spine-view[aria-pressed=true] { color:#f0d39c; border-bottom:1px solid #ae8553; }
 .hint { text-align:center; color:#746e62; font:10px/1.5 monospace; margin:10px 0 11px; }
+.hint { display:none; }
+.library-toolbar { position:absolute;top:14px;left:18px;z-index:3; }
+.library-toolbar button { background:#0c1113cc; }
+.reader-tools { justify-self:center;text-align:center;font:11px monospace;margin:10px 0;max-height:190px;overflow:auto; }
+.reader-tools summary { cursor:pointer;color:#a18b6d;padding:8px; }
+.reader-tools .close-book { display:inline-block; }
+.reader-tools .close-book[hidden] { display:none; }
+#go-page { width:70px;margin:8px;color:#d7c5a1;background:#14191b;border:1px solid #514638;padding:6px; }
+body:has(#shelf[open]) .book-stage { visibility:hidden; }
 .book-3d-controls { max-width:820px; margin:8px auto 0; text-align:center; }
 .book-3d-controls[hidden] { display:none; }
 .three-d-actions { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; }

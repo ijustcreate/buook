@@ -3,9 +3,10 @@
 // A small, dependency-free 3D renderer. Physical boards, paper and spine share
 // world coordinates and one perspective camera; the open renderer is separate.
 class ClosedBooks3D {
+  static thickness(pages){const n=pages||28;return 30+Math.min(n,56)*1.2+42*Math.log1p(Math.max(0,n-56)/220);}
   constructor({canvas, context, materials, changed, open, storage=localStorage}) {
     Object.assign(this,{canvas,ctx:context,materials,changed,open,storage});
-    this.yaw=-.55;this.pitch=.85;this.distance=1000;this.models=[];
+    this.yaw=-Math.PI/2;this.pitch=.43;this.roll=Math.PI/2;this.distance=1050;this.models=[];
     this.selected=null;this.mode='orbit';this.table=false;this.faces=[];this.gesture=null;
     try {this.layout=JSON.parse(storage.getItem('pixel-book-table-v1')||'{}');} catch {this.layout={};}
     if(!this.layout||Array.isArray(this.layout)||typeof this.layout!=='object')this.layout={};
@@ -16,13 +17,13 @@ class ClosedBooks3D {
       const old=table?this.layout[book.id]:null;
       const finite=(key,fallback)=>Number.isFinite(old?.[key])?Math.max(-2000,Math.min(2000,old[key])):fallback;
       return {book,id:book.id,x:finite('x',(i%3-1)*380),z:finite('z',Math.floor(i/3)*500),
-        y:finite('y',0),angle:finite('angle',i%2?.05:-.04),height:25+(book.pageCount||28)*.7,width:320,length:450};
+        y:finite('y',0),angle:finite('angle',i%2?.05:-.04),height:ClosedBooks3D.thickness(book.pageCount),width:320,length:450};
     });
     if(!table&&this.models[0])Object.assign(this.models[0],{x:0,z:0,y:0,angle:0});
     this.selected=this.models.find(m=>m.id===selected)||this.models[0]||null;
     this.settle();this.reset();
   }
-  reset(back=false) {this.center=null;this.yaw=-.55;this.pitch=back?-1.05:.85;this.distance=this.table?1500:1000;this.gesture=null;this.changed();}
+  reset(back=false) {this.center=null;this.yaw=this.table?-.55:-Math.PI/2;this.pitch=this.table?.85:(back?-.43:.43);this.roll=this.table?0:Math.PI/2;this.distance=this.table?1500:1050;this.gesture=null;this.changed();}
   target() {
     if(this.center)return this.center;
     if(!this.models.length)return {x:0,y:0,z:0};
@@ -38,14 +39,16 @@ class ClosedBooks3D {
   project(p) {
     const b=this.basis(),t=this.dragTarget||this.target(),r={x:p.x-t.x,y:p.y-t.y,z:p.z-t.z};
     const depth=this.distance-this.dot(r,b.toward),scale=1000/Math.max(80,depth);
-    return {x:500+this.dot(r,b.right)*scale,y:345-this.dot(r,b.up)*scale,depth};
+    const x=this.dot(r,b.right)*scale,y=-this.dot(r,b.up)*scale,c=Math.cos(this.roll||0),s=Math.sin(this.roll||0);
+    return {x:500+x*c-y*s,y:(this.table?345:332)+x*s+y*c,depth};
   }
   world(m,x,y,z) {const c=Math.cos(m.angle),s=Math.sin(m.angle);return{x:m.x+x*c+z*s,y:m.y+y,z:m.z-x*s+z*c};}
   normal(m,n) {return this.world({...m,x:0,y:0,z:0},...n);}
   ground(point,y=0) {
     const b=this.basis(),t=this.dragTarget||this.target();
     const eye={x:t.x+b.toward.x*this.distance,y:t.y+b.toward.y*this.distance,z:t.z+b.toward.z*this.distance};
-    const x=(point.x-500)/1000,v=(345-point.y)/1000;
+    const c=Math.cos(this.roll||0),s=Math.sin(this.roll||0),dx=point.x-500,dy=point.y-(this.table?345:332);
+    const x=(dx*c+dy*s)/1000,v=(dx*s-dy*c)/1000;
     const ray={x:-b.toward.x+x*b.right.x+v*b.up.x,y:-b.toward.y+x*b.right.y+v*b.up.y,z:-b.toward.z+x*b.right.z+v*b.up.z};
     if(Math.abs(ray.y)<.05)return null;
     const k=(y-eye.y)/ray.y;
@@ -112,10 +115,14 @@ class ClosedBooks3D {
       const target=this.ground(p,g.hit.y+g.hit.height);
       if(target){g.hit.x=Math.max(-1800,Math.min(1800,g.x+target.x-g.start.x));g.hit.z=Math.max(-1800,Math.min(1800,g.z+target.z-g.start.z));}
     }else{
-      this.yaw=g.yaw+(p.x-g.p.x)*.008;
-      this.pitch=Math.max(this.table?.14:-1.48,Math.min(1.48,g.pitch+(p.y-g.p.y)*.006));
+      this.orbitBy(p.x-g.p.x,p.y-g.p.y,g);
     }
     this.changed();
+  }
+  orbitBy(dx,dy,start=this){
+    const c=Math.cos(this.roll||0),s=Math.sin(this.roll||0);
+    this.yaw=start.yaw+(-dx*c+dy*s)*.008;
+    this.pitch=Math.max(this.table?.14:-1.48,Math.min(1.48,start.pitch-(-dx*s+dy*c)*.006));
   }
   pointerUp(cancel=false) {
     const g=this.gesture;if(!g)return;
@@ -129,8 +136,11 @@ class ClosedBooks3D {
   }
   textured(face) {
     this.projectedModel=face.model;
-    const {ctx:p}=this,texture=face.texture;
-    this.poly(face.screen,face.color);
+    const {ctx:p}=this;
+    const alphaArt=face.kind==='cover'||face.kind==='spine';
+    const light={x:-.3,y:.86,z:.42},shade=(.08+.23*(1-Math.max(0,this.dot(face.normal,light))))*(this.lightStrength??1);
+    const texture=alphaArt?this.shadedTexture(face.texture,shade):face.texture;
+    if(!alphaArt)this.poly(face.screen,face.color);
     if(texture&&face.triUV)this.triangle(texture,face.triUV,face.screen);
     else if(texture){
       const b=face.uv||{x:0,y:0,w:texture.width,h:texture.height};
@@ -148,10 +158,17 @@ class ClosedBooks3D {
         this.triangle(texture,[src[0],src[2],src[3]],[dst[0],dst[2],dst[3]]);
       }
     }
-    if(face.kind==='bookmark')return;
-    const light={x:-.3,y:.86,z:.42},shade=.08+.23*(1-Math.max(0,this.dot(face.normal,light)));
-    this.poly(face.screen,'#080b10',shade*(this.lightStrength??1));
+    if(face.kind==='bookmark'||alphaArt)return;
+    this.poly(face.screen,'#080b10',shade);
     p.save();p.strokeStyle='rgba(0,0,0,.35)';p.lineWidth=.7;p.beginPath();face.screen.forEach((v,i)=>i?p.lineTo(v.x,v.y):p.moveTo(v.x,v.y));p.closePath();p.stroke();p.restore();
+  }
+  shadedTexture(texture,shade){
+    if(!texture)return texture;
+    this.shades??=new WeakMap();let cache=this.shades.get(texture);if(!cache){cache=new Map();this.shades.set(texture,cache);}
+    const bucket=Math.round(shade*32);if(!bucket)return texture;if(cache.has(bucket))return cache.get(bucket);
+    const result=document.createElement('canvas');result.width=texture.width;result.height=texture.height;
+    const p=result.getContext('2d');p.drawImage(texture,0,0);p.globalCompositeOperation='source-atop';p.fillStyle=`rgba(8,11,16,${bucket/32})`;p.fillRect(0,0,result.width,result.height);
+    if(cache.size>=6)cache.delete(cache.keys().next().value);cache.set(bucket,result);return result;
   }
   triangle(image,src,dst) {
     const [a,b,c]=src,[A,B,C]=dst,p=this.ctx;
@@ -165,11 +182,11 @@ class ClosedBooks3D {
     const p=this.ctx;this.faces=[];this.projectedModel=null;
     const target=this.dragTarget||this.target();
     // Floor and contact shadows establish scale without flattening the books.
-    if(this.table||this.pitch>0){
+    if(this.table){
       const floor=[[-1400,-1200],[1400,-1200],[1400,1700],[-1400,1700]].map(([x,z])=>this.project({x:x+target.x,y:-3,z:z+target.z}));
       this.poly(floor,'#182023',.5*(this.floorOpacity??1));
       for(const m of this.models){const outline=[];for(let i=0;i<40;i++){const a=i*Math.PI/20;outline.push(this.project(this.world({...m,y:0},Math.cos(a)*210,-1,Math.sin(a)*285)));}this.poly(outline,'#000',.30*(this.floorOpacity??1));}
-    }
+    }else{p.save();p.globalAlpha*=this.floorOpacity??1;p.fillStyle='rgba(0,0,0,.35)';p.beginPath();p.ellipse(500,560,105,10,0,0,Math.PI*2);p.fill();p.restore();}
     const basis=this.basis(),eye={x:target.x+basis.toward.x*this.distance,y:target.y+basis.toward.y*this.distance,z:target.z+basis.toward.z*this.distance};
     for(const m of this.models){
       this.projectedModel=m;
@@ -182,16 +199,25 @@ class ClosedBooks3D {
       };
       add([[-w,h,-l],[w,h,-l],[w,h,l],[-w,h,l]],[0,1,0],material.front,material.leather,'cover');
       add([[-w,0,l],[w,0,l],[w,0,-l],[-w,0,-l]],[0,-1,0],material.back,material.leather,'cover');
-      for(const y of [0,h-board]){
-        add([[w,y+board,-l],[w,y+board,l],[w,y,l],[w,y,-l]],[1,0,0],null,material.leather);
-        add([[-w,y+board,l],[w,y+board,l],[w,y,l],[-w,y,l]],[0,0,1],null,material.leather);
-        add([[w,y+board,-l],[-w,y+board,-l],[-w,y,-l],[w,y,-l]],[0,0,-1],null,material.leather);
+      for(const [edge,y] of [['back',0],['front',h-board]]){
+        const profile=material.profiles[edge],flip=edge==='back'?-1:1;
+        for(let i=0;i<profile.length;i++){
+          const a=profile[i],b=profile[(i+1)%profile.length],ax=(a.u-.5)*m.width,az=(a.v-.5)*m.length*flip,bx=(b.u-.5)*m.width,bz=(b.v-.5)*m.length*flip;
+          const dx=bx-ax,dz=bz-az,length=Math.hypot(dx,dz);if(length<.001)continue;
+          add([[ax,y+board,az],[bx,y+board,bz],[bx,y,bz],[ax,y,az]],[dz/length*flip,0,-dx/length*flip],null,material.leather);
+        }
       }
       const x=w-7,z=l-7;
       add([[x,board+paper,-z],[x,board+paper,z],[x,board,z],[x,board,-z]],[1,0,0],material.paper,'#bf965d','paper',material.paperUV);
       add([[-x,board+paper,z],[x,board+paper,z],[x,board,z],[-x,board,z]],[0,0,1],material.paper,'#bf965d','paper',material.paperUV);
       add([[x,board+paper,-z],[-x,board+paper,-z],[-x,board,-z],[x,board,-z]],[0,0,-1],material.paper,'#bf965d','paper',material.paperUV);
-      add([[-w,h,-l],[-w,0,-l],[-w,0,l],[-w,h,l]],[-1,0,0],material.spine,material.leather,'spine');
+      // Image U goes from back board to front board. The old opposite
+      // ordering viewed the inscription from inside the binding (mirrored).
+      for(let i=0;i<8;i++){
+        const u=i/8,U=(i+1)/8,at=t=>[-w-Math.sin(Math.PI*t)*4.5,t*h];
+        const [ax,ay]=at(u),[bx,by]=at(U),length=Math.hypot(bx-ax,by-ay);
+        add([[ax,ay,-l],[bx,by,-l],[bx,by,l],[ax,ay,l]],[-(by-ay)/length,(bx-ax)/length,0],material.spine,material.leather,'spine',{x:u*material.spine.width,y:0,w:(U-u)*material.spine.width,h:material.spine.height});
+      }
       for(const mark of material.bookmarks||[]){
         const width=128*208/180*mark.size/400*m.width,height=96*164/136*mark.size/350*m.length;
         const angle=mark.rotation*(mark.page%2?-1:1),c=Math.cos(angle),s=Math.sin(angle);

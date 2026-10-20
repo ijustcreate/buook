@@ -10,6 +10,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
   try{
     if(!profile)await page.goto(process.argv[2]||'http://127.0.0.1:4174/');
     await page.waitForFunction(()=>loaded,null,{timeout:60000});
+    await page.evaluate(()=>$('#shelf').close());
     const results=[];
     for(const edge of ['front','back']){
       await page.evaluate(edge=>{

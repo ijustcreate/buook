@@ -9,12 +9,13 @@ const os=require('node:os');
   const page=profile?await browser.firstWindow():await browser.newPage({viewport:{width:1180,height:950}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   const output=await fs.mkdtemp(path.join(os.tmpdir(),'pixel-book-3d-'));
-  const ready=()=>page.waitForFunction(()=>loaded&&!motion&&!coverMotion,null,{timeout:60000});
+  const ready=async()=>{await page.waitForFunction(()=>loaded&&!motion&&!coverMotion,null,{timeout:60000});await page.evaluate(()=>{$('#shelf').close();$('.reader-tools').open=true;});};
   const mouse=async p=>{const box=await page.locator('#book').boundingBox();return{x:box.x+p.x/1000*box.width,y:box.y+p.y/680*box.height};};
   const drag=async(from,to)=>{const a=await mouse(from),b=await mouse(to);await page.mouse.move(a.x,a.y);await page.mouse.down();await page.mouse.move(b.x,b.y,{steps:12});await page.mouse.up();};
   try{
     if(!profile)await page.goto(process.argv[2]||'http://127.0.0.1:4174/');await ready();
     assert.equal(await page.title(),'Pixel Book');
+    await page.evaluate(()=>{openSavedBook('starter-keeper');savedBooks=[];localStorage.setItem('keepers-book-shelf-v1','[]');});
     await page.locator('#close-book').click();await page.waitForFunction(()=>closedEdge==='front'&&!coverMotion);
     await page.waitForFunction(()=>closedBooks3D.faces.length>0);
     const before=await page.evaluate(()=>closedBooks3D.yaw);
