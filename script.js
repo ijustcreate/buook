@@ -1984,10 +1984,13 @@ function settle(commit=true,overrideDuration=null) {
   // Prepare new page textures before the animation clock starts.
   for(const number of [spread*2-1,spread*2,turnDestination()*2-1,turnDestination()*2])if(number>=0&&number<pageCount)viewport(number);
   const start=motion.progress,target=commit?1:0;
-  const duration=(overrideDuration??Number($('#speed').value))*Math.abs(target-start),time=performance.now();
+  const duration=(overrideDuration??Number($('#speed').value))*Math.abs(target-start);let time=null;
   if(!motion.soundPlayed&&commit){motion.soundPlayed=true;playPaperSound(!!chapterJourney);}
   const frame=now=>{
     if(!motion)return;
+    // Start at the first display frame, not while the browser is still
+    // flushing the preceding page's draw commands and texture uploads.
+    if(time===null)time=now;
     // Use real elapsed time: slow rendering must not stretch a 520ms turn
     // into seconds. Missed frames advance the pose, not the duration.
     const t=clamp((now-time)/Math.max(1,duration));

@@ -34,7 +34,7 @@ const functions={mesh:baseline.slice(baseline.indexOf('function mesh('),baseline
    // Simulate bad 100ms frame cadence without waiting, using the real clock origin.
    spread=3;begin(1,true);const queue=[],native=requestAnimationFrame;requestAnimationFrame=cb=>{queue.push(cb);return queue.length;};const time=performance.now();settle(true,520);let n=0;
    while(motion&&n<20){const cb=queue.shift();if(!cb)throw Error('Missing scheduled frame');cb(time+(++n)*100+20);}
-   requestAnimationFrame=native;if(motion||n>6)throw Error('Slow frames prolonged turn');
+   requestAnimationFrame=native;if(motion||n>7)throw Error('Slow frames prolonged turn');
    return{visual,benchmarks,quads:count,readableQuads:readable,simulated100msFramesToComplete:n,canvas:[canvas.width,canvas.height]};
   },functions);
   assert.ok(result.quads.after<result.quads.before*.5);for(const side of ['Before','After']){const data=await page.evaluate(side=>window['perf'+side],side);await fs.writeFile(path.join(output,side.toLowerCase()+'.png'),Buffer.from(data.split(',')[1],'base64'));}await page.screenshot({path:path.join(output,'full-quality-pages.png')});assert.deepEqual(errors,[]);console.log(JSON.stringify({...result,errors,output}));

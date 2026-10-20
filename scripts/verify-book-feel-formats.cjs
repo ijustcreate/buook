@@ -20,10 +20,14 @@ const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=r
   await page.reload();await page.waitForFunction(()=>loaded);assert.equal(await page.evaluate(()=>bookFormat().mode),'custom');
   const journey=await page.evaluate(async()=>{
    openSavedBook('starter-frankenstein');spread=0;closedEdge=null;draw();window.journeyFrames=[];const original=draw;draw=function(){if(motion)journeyFrames.push({from:spread,to:turnDestination(),p:motion.progress,style:document.querySelector('.book-stage').style.transform});original();};
-   navigateToChapter(201);const first=spread,route=[...chapterJourney.route];await new Promise((resolve,reject)=>{const start=performance.now();function check(){if(!motion&&!chapterJourney)return resolve();if(performance.now()-start>20000)return reject(Error('Journey stalled'));setTimeout(check,30);}check();});
+   // Functional pose coverage uses a controlled 60Hz clock; real cadence is
+   // measured separately by verify-turn-performance on both browser/desktop.
+   const nativeRAF=requestAnimationFrame,queue=[];requestAnimationFrame=cb=>{queue.push(cb);return queue.length;};let tick=performance.now();
+   const complete=()=>{let count=0;while(motion||chapterJourney){const cb=queue.shift();if(!cb||++count>1000)throw Error('Journey stalled');cb(tick+=1000/60);}};
+   navigateToChapter(201);const first=spread,route=[...chapterJourney.route];complete();
    draw=original;const forward=spread;const frames=journeyFrames;const expected=Math.ceil(201/2);if(first!==0||forward!==expected)throw Error('Incorrect journey endpoint');
-   for(const to of route)if(!frames.some(f=>f.to===to&&f.p>.35&&f.p<.65))throw Error('Skipped visible page turn');
-   navigateToChapter(8);await new Promise(resolve=>{function check(){if(!motion&&!chapterJourney)resolve();else setTimeout(check,30);}check();});
+   for(const to of route)if(!frames.some(f=>f.to===to&&f.p>.35&&f.p<.65))throw Error('Skipped visible page turn '+JSON.stringify({to,poses:frames.filter(f=>f.to===to).map(f=>f.p)}));
+   navigateToChapter(8);complete();requestAnimationFrame=nativeRAF;
    return{first,route,forward,reverse:spread,frames:frames.length};
   });assert.equal(journey.reverse,4);
   await page.emulateMedia({reducedMotion:'reduce'});assert.equal(await page.evaluate(()=>{motion={direction:1,progress:.4};updateBookResponse();const result=document.querySelector('.book-stage').style.transform;motion=null;return result;}),'');
