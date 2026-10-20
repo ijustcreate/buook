@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.20 — 2026-10-20
+
+- Match page-number lettering to the book's selected font, including the default novel serif, while preserving folio placement and PDF numbering.
+
 ## 1.0.19 — 2026-10-20
 
 - Add live book-wide font selectors above the book and inside the large-text reader, with per-book persistence and an Original page fonts reset.

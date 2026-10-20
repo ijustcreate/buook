@@ -376,7 +376,15 @@ function drawPageNumber(p,number,placement,hand) {
   if(number>=readingPageCount())return;
   if(pageRole(number)==='title'||pageRole(number)==='contents')return;
   const locations={'bottom-center':[188,326],'top-left':[25,20],'top-right':[350,20],'bottom-left':[25,326],'bottom-right':[350,326]};
-  const [x,y]=locations[placement]||locations['bottom-center'];p.save();p.fillStyle='#5b3e2d';ink(p,String(automaticFolio(number)),x,y,1.2,hand);p.restore();
+  const [x,y]=locations[placement]||locations['bottom-center'],custom=bookPage(number);
+  p.save();p.fillStyle=custom.ink||'#5b3e2d';
+  if(hasBookFont()||custom.novel||custom.font&&custom.font!=='pixel'){
+    const family=hasBookFont()||custom.novel?bookFontFamily():custom.font==='serif'?'Georgia,serif':'ui-monospace,monospace';
+    p.font=(custom.font==='serif'&&!custom.novel&&!hasBookFont()?'italic ':'')+'12px '+family;p.textBaseline='top';
+    p.textAlign=placement.includes('center')?'center':placement.includes('right')?'right':'left';
+    p.fillText(String(automaticFolio(number)),placement.includes('center')?PAGE_W/2:x,y);
+  }else ink(p,String(automaticFolio(number)),x,y,1.2,hand);
+  p.restore();
 }
 
 function registerTocAreas(page,chain,side) {

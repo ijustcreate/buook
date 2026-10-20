@@ -14,6 +14,9 @@ const {chromium,_electron}=require('playwright'),assert=require('node:assert/str
       const dense=Object.values(starterLibrary.get('dracula').pages).filter(p=>p.novel).sort((a,b)=>b.body.length-a.body.length)[0].body;
       for(const font of bookFonts.values()){
         await chooseBookFont(font.id);const layout=layoutNovelText(dense,p);
+        const fonts=[],fake={save(){},restore(){},fillText(){fonts.push(this.font);}};
+        drawPageNumber(fake,100,'bottom-center','keeper');
+        if(!fonts[0]?.includes(font.family))throw new Error('Folio font does not match: '+font.label);
         if(layout.lines.length*layout.lineHeight>274.01)throw new Error('Font overflows source page: '+font.label);
         if(layout.lines.join(' ').replace(/\s+/g,' ').trim()!==dense.replace(/\s+/g,' ').trim())throw new Error('Font switch lost text: '+font.label);
         if(readingPageCount()!==509||pageCount!==510)throw new Error('Font switch changed PDF pagination');
