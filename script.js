@@ -58,6 +58,7 @@ async function load() {
     await loadBookFonts();
     await loadStarterLibrary();
     seedStarterBooks();
+    migrateDefaultBookFont();
     migrateStarterEditions();pageCount=bookContent.pageCount;setBookResolution();
     await Promise.all(Object.entries({
       board:'inside-board-v3.png',binding:'open-spine-v3.png',stack:'page-stack-v2.png',leather:'leather-stack-v2.png',
@@ -147,7 +148,7 @@ const entries = [
 function loadBookContent() {
   try {
     const saved=JSON.parse(localStorage.getItem(contentKey)||'{}');
-    return {bookFont:saved.bookFont||'original',starterId:saved.starterId||null,edition:saved.edition,sourcePageCount:saved.sourcePageCount,name:saved.name||'The Keeper’s Book',pageCount:saved.pageCount||28,pages:saved.pages||{},edgeBookmarks:Array.isArray(saved.edgeBookmarks)?saved.edgeBookmarks:[],covers:{front:{},back:{},...(saved.covers||{})},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold',...(saved.palette||{})}};
+    return {bookFont:saved.bookFont||DEFAULT_BOOK_FONT,starterId:saved.starterId||null,edition:saved.edition,sourcePageCount:saved.sourcePageCount,name:saved.name||'The Keeper’s Book',pageCount:saved.pageCount||28,pages:saved.pages||{},edgeBookmarks:Array.isArray(saved.edgeBookmarks)?saved.edgeBookmarks:[],covers:{front:{},back:{},...(saved.covers||{})},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold',...(saved.palette||{})}};
   } catch { return {name:'The Keeper’s Book',pageCount:28,pages:{},covers:{front:{},back:{}},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold'}}; }
 }
 
@@ -1708,13 +1709,13 @@ function saveBook(copy=false){
   // previous named spine and make the renamed save its own book entry.
   if(book&&book.name!==bookName)book=null;
   if(!book){book={id:crypto.randomUUID(),name:bookName,pageCount,pages:{},covers:{}};savedBooks.push(book);activeBookId=book.id;localStorage.setItem('keepers-book-active',activeBookId);}
-  book.bookFont=bookContent.bookFont||'original';book.edition=bookContent.edition;book.sourcePageCount=bookContent.sourcePageCount;book.starterId=bookContent.starterId;book.name=bookName;book.pageCount=pageCount;book.pages=structuredClone(bookContent.pages);book.covers=structuredClone(bookContent.covers);book.palette={...bookContent.palette};book.edgeBookmarks=structuredClone(bookContent.edgeBookmarks||[]);book.savedAt=Date.now();
+  book.bookFont=selectedBookFont();book.edition=bookContent.edition;book.sourcePageCount=bookContent.sourcePageCount;book.starterId=bookContent.starterId;book.name=bookName;book.pageCount=pageCount;book.pages=structuredClone(bookContent.pages);book.covers=structuredClone(bookContent.covers);book.palette={...bookContent.palette};book.edgeBookmarks=structuredClone(bookContent.edgeBookmarks||[]);book.savedAt=Date.now();
   localStorage.setItem('keepers-book-shelf-v1',JSON.stringify(savedBooks));persistBookContent();$('#status').textContent='Saved to your shelf.';renderShelf();
 }
 function openSavedBook(id,quiet=false){
   const book=savedBooks.find(entry=>entry.id===id);if(!book)return;
   bookTableMode=false;
-  bookName=book.name;bookContent.bookFont=book.bookFont||'original';bookContent.edition=book.edition;bookContent.sourcePageCount=book.sourcePageCount;bookContent.starterId=book.starterId||null;bookContent.name=book.name;bookContent.pageCount=book.pageCount;pageCount=book.pageCount;setBookResolution();syncBookFontControls();
+  bookName=book.name;bookContent.bookFont=book.bookFont||DEFAULT_BOOK_FONT;bookContent.edition=book.edition;bookContent.sourcePageCount=book.sourcePageCount;bookContent.starterId=book.starterId||null;bookContent.name=book.name;bookContent.pageCount=book.pageCount;pageCount=book.pageCount;setBookResolution();syncBookFontControls();
   bookContent.pages=structuredClone(book.pages||{});bookContent.covers={front:{},back:{},...(book.covers||{})};bookContent.palette={outside:'#9b382d',inside:'#c85e68',metal:'gold',...(book.palette||{})};activeBookId=id;localStorage.setItem('keepers-book-active',id);
   $('#book-name').value=bookName;$('#outside-color').value=bookContent.palette.outside;$('#inside-color').value=bookContent.palette.inside;$('#metal-color').value=bookContent.palette.metal;
   bookContent.edgeBookmarks=structuredClone(book.edgeBookmarks||[]);resetSessionInserts();restoreEdgeBookmarks();

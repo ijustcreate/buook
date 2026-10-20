@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.22 — 2026-10-20
+
+- Make Alagard the default book font, including page numbers, title pages, contents and the large-text reader.
+- Upgrade prior default/Original books once while preserving other selected fonts; later explicit Original page fonts choices remain intact.
+
 ## 1.0.21 — 2026-10-20
 
 - Add seven PDF-sourced classics: The Picture of Dorian Gray, Peter Pan (Peter and Wendy), the complete Longfellow Divine Comedy, The Time Machine, Common Sense, The Secret Garden, and Romeo and Juliet.

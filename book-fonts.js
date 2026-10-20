@@ -1,8 +1,17 @@
 'use strict';
 const bookFonts=new Map();
+const DEFAULT_BOOK_FONT='alagard';
 const fontId=name=>name.toLowerCase().replace(/\.(ttf|otf)$/,'').replace(/[^a-z0-9]+/g,'-');
-const bookFontFamily=()=>bookFonts.get(bookContent.bookFont)?.family?'"'+bookFonts.get(bookContent.bookFont).family+'", Georgia, serif':'Georgia, serif';
-const hasBookFont=()=>!!bookContent.bookFont&&bookContent.bookFont!=='original';
+const selectedBookFont=()=>bookContent.bookFont||DEFAULT_BOOK_FONT;
+const bookFontFamily=()=>bookFonts.get(selectedBookFont())?.family?'"'+bookFonts.get(selectedBookFont()).family+'", Georgia, serif':'Georgia, serif';
+const hasBookFont=()=>selectedBookFont()!=='original';
+function migrateDefaultBookFont(){
+  if(localStorage.getItem('pixel-book-alagard-default-v1'))return;
+  for(const book of savedBooks)if(!book.bookFont||book.bookFont==='original')book.bookFont=DEFAULT_BOOK_FONT;
+  if(!bookContent.bookFont||bookContent.bookFont==='original')bookContent.bookFont=DEFAULT_BOOK_FONT;
+  localStorage.setItem('keepers-book-shelf-v1',JSON.stringify(savedBooks));persistBookContent();
+  localStorage.setItem('pixel-book-alagard-default-v1','1');
+}
 async function registerBookFont(entry,buffer=null){
   const face=new FontFace(entry.family,buffer||'url("'+entry.url+'")');
   await face.load();document.fonts.add(face);bookFonts.set(entry.id,{...entry,face});
@@ -22,7 +31,7 @@ async function loadBookFonts(){
 }
 function syncBookFontControls(){
   for(const id of ['book-font','reading-font']){
-    const select=document.getElementById(id),value=bookContent.bookFont||'original';
+    const select=document.getElementById(id),value=selectedBookFont();
     if(select.dataset.fontCount!==String(bookFonts.size)){
       select.replaceChildren(new Option('Original page fonts','original'));
       for(const font of [...bookFonts.values()].sort((a,b)=>a.label.localeCompare(b.label))){const option=new Option(font.label,font.id);option.style.fontFamily='"'+font.family+'"';select.append(option);}

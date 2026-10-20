@@ -31,7 +31,8 @@ const {chromium,_electron}=require('playwright'),assert=require('node:assert/str
     await page.screenshot({path:path.join(output,'live-reading-font.png')});await page.locator('#reading-close').click();
     await page.reload();await page.waitForFunction(()=>loaded);await page.evaluate(()=>openSavedBook('starter-dracula'));
     assert.equal(await page.locator('#book-font').inputValue(),'mojang-regular');
-    await page.evaluate(()=>openSavedBook('starter-keeper'));assert.equal(await page.locator('#book-font').inputValue(),'original');
+    await page.evaluate(()=>openSavedBook('starter-keeper'));assert.equal(await page.locator('#book-font').inputValue(),'alagard');
+    await page.locator('#book-font').selectOption('original');await page.reload();await page.waitForFunction(()=>loaded);await page.evaluate(()=>openSavedBook('starter-keeper'));assert.equal(await page.locator('#book-font').inputValue(),'original');
     // Import a local-only font through the actual file input, then reload it
     // from IndexedDB without putting its bytes in the public deployment.
     if(!profile){
