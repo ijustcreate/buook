@@ -10,7 +10,7 @@ No installation or account is required. The browser version uses the same book r
 
 The approved working checkpoint is **v1.0.11**. The app displays **Pixel Book**; Windows installers/executables retain their legacy **The Book** identifier. The application ID and save location are intentionally unchanged so existing books keep working.
 
-The current development version is **v1.0.23**, with a continuously joined flexible binding during opening/closing, Alagard as the default book font, seven added PDF-sourced classics, structured clickable PDF contents, centered title compositions, restored source illustrations and evenly spaced material mapping across curved pages. It retains live book-wide font selection and matching page numbers, PDF-aligned pagination, sharper on-book text, an adjustable large-text reader, external contents/page navigation and full cover colour pickers. There are now ten starter books, up to 4,096 pages per book, natural photo tugging and the upright ornate 3D spine. The `v1.0.11` checkpoint is preserved unchanged. The original `buook` web address and desktop profile remain unchanged to preserve saved books.
+The current development version is **v1.0.25**, adding consistent book-wide body type, real PDF-format shelf heights, and ornate bookshelf spines using the exact leather, title, raised-band and end-ornament textures from the closed 3D books. Short pages retain whitespace rather than enlarging their lettering. Shelf thickness follows page count, while height follows the source edition's median page dimensions. Entries remain keyboard-accessible and clickable. The `v1.0.11` checkpoint, original `buook` web address, and desktop profile remain unchanged to preserve saved books.
 
 The novel text follows the supplied PDFs page for page, including blanks: **Dracula has 509 reading pages; Frankenstein has 268**. Dracula's physical binding has one extra blank reverse, excluded from reading-page counts. Original text-extraction artifacts may remain. Older expanded editions with edits or bookmarks are preserved as a separate “previous pagination” shelf copy during migration. Bundled novel text stays outside localStorage; your edits, copies and shelf remain local.
 
@@ -42,7 +42,7 @@ The curved page chain is spaced by material arc length so equal source columns n
 
 ### Live fonts
 
-The **Book font** selector above the book changes page lettering immediately; the matching selector in **Read text** previews the same choice at a larger size. Each book remembers its font. **Original page fonts** restores its original per-page styling. Switching fonts never adds or removes PDF pages; dense source pages fit their lettering to the original page boundary.
+The **Book font** selector above the book changes page lettering immediately; the matching selector in **Read text** previews the same choice at a larger size. Each book remembers its font. **Original page fonts** restores its original per-page styling. Switching fonts never adds or removes PDF pages. A single body size is selected for each book/font against all source-page text regions; short chapter-ending pages retain their empty space instead of enlarging text. Title/chapter-heading hierarchy remains separate. Dense PDF editions can still require small physical-view lettering to preserve page boundaries; **Read text** provides an adjustable larger view without repagination.
 
 **Alagard** is the default, including folios, titles and contents. Existing books using the former default are upgraded once; books with another selected font keep it. An explicit Original page fonts selection made after the upgrade remains respected.
 
@@ -152,6 +152,8 @@ node scripts/verify-reader.cjs http://127.0.0.1:4174/
 node scripts/verify-fonts.cjs http://127.0.0.1:4174/
 node scripts/verify-classic-library.cjs http://127.0.0.1:4174/
 node scripts/verify-pdf-design.cjs http://127.0.0.1:4174/
+node scripts/verify-consistent-type.cjs http://127.0.0.1:4174/
+node scripts/verify-shelf-spines.cjs http://127.0.0.1:4174/
 node scripts/verify-edge-bookmarks.cjs http://127.0.0.1:4174/
 ```
 

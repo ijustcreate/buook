@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.25 — 2026-10-20
+
+- Use a single body font size per edition/font, checked against every text region; sparse pages retain whitespace instead of magnifying text. Preserve title/chapter heading hierarchy and source pagination.
+- Cache word measurements and edition typography so changing fonts and turning pages stay responsive.
+- Derive shelf height from source PDF trim dimensions independently of page-count spine thickness; use a standard fallback for custom journals.
+- Keep verse/dialogue leading appropriate and distinguish Dante's prose appendix from verse.
+- Extend the PDF-design skill with consistent-body-size and source-format shelf rules.
+
+## 1.0.24 — 2026-10-20
+
+- Replace plain bookshelf bars with the exact ornate spine textures from the closed 3D books, including raised bands, mirrored end ornaments, transparent contours and each book's title/leather/metal colours.
+- Scale shelf thickness by the book's physical page-count model; retain accessible names, page counts, keyboard focus and click-to-open behavior.
+
 ## 1.0.23 — 2026-10-20
 
 - Deform the flexible binding between the moving cover hinge and stationary board during opening/closing, rather than leaving the open-spine image frozen behind the moving cover.

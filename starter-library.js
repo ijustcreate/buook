@@ -34,6 +34,7 @@ async function loadStarterLibrary(){
     starterLibrary.set(novel.id,{...common,id:'starter-'+novel.id,starterId:novel.id,edition:2,pageCount,sourcePageCount:novel.sourcePages,pages});
     const design=designs[novel.id];
     if(design){
+      starterLibrary.get(novel.id).format=design.format;
       if(design.contents.length)starterLibrary.get(novel.id).contents=design.contents;
       for(const [number,data] of Object.entries(design.pages))Object.assign(pages[number],data);
     }

@@ -4,6 +4,7 @@ Produces read-only design metadata; never repaginates or modifies source PDFs.
 """
 import json
 import re
+import statistics
 from pathlib import Path
 import pdfplumber
 import pypdfium2 as pdfium
@@ -14,7 +15,9 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def design_book(book, filename):
     reader = PdfReader(filename)
-    design = {'pages': {}, 'contents': []}
+    design = {'pages': {}, 'contents': [], 'format': {
+        'widthPt': statistics.median(float(p.mediabox.width) for p in reader.pages),
+        'heightPt': statistics.median(float(p.mediabox.height) for p in reader.pages)}}
     current_volume = ''
 
     def outlines(items, parent=''):
@@ -52,6 +55,8 @@ def design_book(book, filename):
     for index, page in enumerate(reader.pages):
         data = {}
         text = book['textPages'][index]
+        if book['id'] == 'divine-comedy' and any(c['title'] == 'Appendix' and c['page'] <= index for c in book.get('chapters', [])):
+            data['preserveLines'] = False
         # Title and author belong in an intentional centered title composition.
         title_index = 1 if book['id'] == 'dracula' else 0
         if index == title_index and len(text) < 600:

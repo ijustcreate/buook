@@ -7,21 +7,47 @@ function setBookResolution(){
   canvas.classList.toggle('clear-type',!!bookContent.starterId||hasBookFont());
   textures.clear();shadedTextures.clear();
 }
-function layoutNovelText(text,p,preserveLines=false,height=274){
+const measuredWordWidths=new Map(),bookBodySizes=new Map();
+function layoutNovelText(text,p,preserveLines=false,height=274,fixedSize=null){
   const paragraphs=(preserveLines?String(text).trim().split(/\n/):[String(text).trim()]).map(line=>line.trim().split(/\s+/).filter(Boolean));
   function fit(size){
-    p.font=size+'px '+bookFontFamily();const lines=[];
+    p.font=size+'px '+bookFontFamily();p.fontKerning='none';const lines=[];
+    let widths=measuredWordWidths.get(p.font);if(!widths){widths=new Map();if(measuredWordWidths.size>=64)measuredWordWidths.delete(measuredWordWidths.keys().next().value);measuredWordWidths.set(p.font,widths);}
+    const width=word=>{if(!widths.has(word))widths.set(word,p.measureText(word).width);return widths.get(word);},space=width(' ');
     for(const words of paragraphs){let line='';
-      for(const word of words){const next=line?line+' '+word:word;if(line&&p.measureText(next).width>304){lines.push(line);line=word;}else line=next;}
+      let lineWidth=0;
+      for(const word of words){const wordWidth=width(word),next=lineWidth+(line?space:0)+wordWidth;if(line&&next>304){lines.push(line);line=word;lineWidth=wordWidth;}else{line=line?line+' '+word:word;lineWidth=next;}}
       if(line||preserveLines)lines.push(line);
     }
-    const metrics=p.measureText('Agjy'),lineHeight=Math.max(size*1.4,metrics.actualBoundingBoxAscent+metrics.actualBoundingBoxDescent+2);
+    const metrics=p.measureText('Agjy'),lineHeight=Math.max(size*(preserveLines?1.2:1.4),metrics.actualBoundingBoxAscent+metrics.actualBoundingBoxDescent+(preserveLines?.5:2));
     return{size,lineHeight,lines};
   }
+  if(fixedSize!==null)return fit(fixedSize);
   let low=8,high=56,best=fit(2);
   while(low<=high){const middle=Math.floor((low+high)/2),layout=fit(middle/4);if(layout.lines.length*layout.lineHeight<=height){best=layout;low=middle+1;}else high=middle-1;}
   return best;
 }
+function novelBodyRegion(data){
+  let text=data.body||'',top=data.sourceFigures?.length&&text.trim()?204:38;
+  if(data.chapterOpening&&text.startsWith(data.chapterOpening)){text=text.slice(data.chapterOpening.length).trim();top=Math.max(top,77);}
+  return{text,top,height:312-top,preserveLines:!!data.preserveLines};
+}
+function bookBodyFontSize(p){
+  const key=JSON.stringify([bookContent.starterId,selectedBookFont(),pageCount,bookContent.pages]);
+  if(bookBodySizes.has(key))return bookBodySizes.get(key);
+  const regions=[];
+  for(let n=0;n<readingPageCount();n++){const data=bookPage(n);if(data.novel&&!data.titlePage&&!data.tocRows&&data.body?.trim())regions.push(novelBodyRegion(data));}
+  // Test the densest regions first. This usually rejects a candidate before
+  // measuring the rest, but every page is checked before accepting a size.
+  regions.sort((a,b)=>(b.text.length+(b.preserveLines?b.text.split('\n').length*90:0))/b.height-(a.text.length+(a.preserveLines?a.text.split('\n').length*90:0))/a.height);
+  let low=8,high=56,best=2;
+  while(low<=high){const middle=Math.floor((low+high)/2),size=middle/4;
+    const fits=regions.every(region=>{const layout=layoutNovelText(region.text,p,region.preserveLines,region.height,size);return layout.lines.length*layout.lineHeight<=region.height;});
+    if(fits){best=size;low=middle+1;}else high=middle-1;
+  }
+  if(bookBodySizes.size>=8)bookBodySizes.delete(bookBodySizes.keys().next().value);bookBodySizes.set(key,best);return best;
+}
+function layoutBookBody(data,p){const region=novelBodyRegion(data);return{...layoutNovelText(region.text,p,region.preserveLines,region.height,bookBodyFontSize(p)),top:region.top};}
 function sourceContentsLayout(number){
   const p=document.createElement('canvas').getContext('2d'),rows=bookPage(number).tocRows||[];
   for(let size=12;size>=4;size-=.25){

@@ -317,9 +317,9 @@ function viewport(number) {
         p.save();p.font='18px '+bookFontFamily();p.fillStyle=inkColor;p.textAlign='center';p.textBaseline='top';p.fillText(custom.chapterOpening,200,38,304);p.restore();
         body=body.slice(custom.chapterOpening.length).trim();bodyTop=Math.max(bodyTop,77);
       }
-      const layout=layoutNovelText(body,p,custom.preserveLines,312-bodyTop);
+      const layout=layoutBookBody(custom,p);
       p.fillStyle=custom.ink||'#302019';p.font=layout.size+'px '+bookFontFamily();p.textBaseline='top';
-      layout.lines.forEach((line,i)=>p.fillText(line,45,bodyTop+i*layout.lineHeight));
+      layout.lines.forEach((line,i)=>p.fillText(line,45,layout.top+i*layout.lineHeight));
       drawPageNumber(p,number,custom.pageNumberPlacement||'bottom-center',hand);
     } else if(role==='contents') {
       p.fillStyle=inkColor;ink(p,'CONTENTS',45,31,1.05,hand);
@@ -1694,10 +1694,18 @@ function renderShelf(){
   const container=$('#shelf-books');container.replaceChildren();$('#shelf-empty').hidden=savedBooks.length>0;
   savedBooks.forEach(book=>{
     const button=document.createElement('button');button.type='button';button.className='shelf-spine';
-    button.style.setProperty('--spine-width',`${Math.min(48,22+book.pageCount*.45)}px`);
-    button.style.setProperty('--shelf-leather',book.palette?.outside||'#9b382d');
-    button.style.setProperty('--shelf-metal',book.palette?.metal==='silver'?'#dce6ee':'#f0cd82');
-    button.innerHTML=`<span>${escapeText(book.name)}</span><small>${book.sourcePageCount||book.pageCount} pages</small>`;
+    const width=clamp(24+(ClosedBooks3D.thickness(book.pageCount)-ClosedBooks3D.thickness(8))/(ClosedBooks3D.thickness(510)-ClosedBooks3D.thickness(8))*34,24,68);
+    button.style.setProperty('--spine-width',width+'px');button.dataset.bookId=book.id;
+    const pages=book.sourcePageCount||book.pageCount;
+    button.setAttribute('aria-label',`${book.name}, ${pages} pages`);button.title=`${book.name} · ${pages} pages`;
+    // Reuse the exact tinted, titled spine material used by the closed 3D
+    // book, including its alpha silhouette, raised bands and ornate ends.
+    const format=book.format||starterLibrary.get(book.starterId)?.format||{heightPt:648};
+    const height=clamp(format.heightPt/792*216,138,260);button.style.setProperty('--spine-height',height+'px');
+    const texture=closedMaterials(book).spine,spine=document.createElement('canvas');spine.width=texture.width;spine.height=texture.height;spine.setAttribute('aria-hidden','true');
+    spine.getContext('2d').drawImage(texture,0,0);
+    const count=document.createElement('small');count.textContent=pages+' pages';count.setAttribute('aria-hidden','true');
+    button.append(spine,count);
     button.onclick=()=>openSavedBook(book.id);container.append(button);
   });
 }
