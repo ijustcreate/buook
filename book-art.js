@@ -72,7 +72,7 @@ async function placeRegionArt(file){
   if(treatment!=='original'){
     const result=await renderBookArt(file,{treatment,removeWhite:$('#page-art-white').checked,smooth:$('#page-art-smooth').checked,width:Math.min(800,box.w*2),height:Math.min(700,box.h*2)});recipe=result.recipe;src=await saveArtBlob(result.blob,{kind:'derivative',originalSrc,recipe});
   }
-  const url=await resolveArtAsset(src),img=new Image();img.src=url;await img.decode();const scale=Math.min(box.w/img.width,box.h/img.height),w=img.width*scale,h=img.height*scale;
+  const url=await resolveArtAsset(src),img=new Image();img.src=url;await img.decode();const sx=bookWidthScale(),scale=Math.min(box.w*sx/img.width,box.h/img.height),w=img.width*scale/sx,h=img.height*scale;
   const data=structuredClone(bookPage(selection.page));data.images||=[];data.images.push({id:crypto.randomUUID(),src,originalSrc,recipe,alt:file.name||'Page illustration',regionId:selection.id,polygon:selection.points,x:box.x+(box.w-w)/2,y:box.y+(box.h-h)/2,w,h});artPersistPage(selection.page,data);
   $('#page-art-status').textContent='Image saved locally in this page region. Turn the page to see it travel with the paper.';
 }

@@ -17,7 +17,7 @@ class ClosedBooks3D {
       const old=table?this.layout[book.id]:null;
       const finite=(key,fallback)=>Number.isFinite(old?.[key])?Math.max(-2000,Math.min(2000,old[key])):fallback;
       return {book,id:book.id,x:finite('x',(i%3-1)*380),z:finite('z',Math.floor(i/3)*500),
-        y:finite('y',0),angle:finite('angle',i%2?.05:-.04),shelved:old?.location==='shelf',shelfOrder:finite('shelfOrder',i),height:ClosedBooks3D.thickness(book.pageCount),width:320,length:450};
+        y:finite('y',0),angle:finite('angle',i%2?.05:-.04),shelved:old?.location==='shelf',shelfOrder:finite('shelfOrder',i),height:ClosedBooks3D.thickness(book.pageCount),width:450*bookFormatRatio(book),length:450};
     });
     if(!table&&this.models[0])Object.assign(this.models[0],{x:0,z:0,y:0,angle:0});
     this.selected=this.models.find(m=>m.id===selected)||this.models[0]||null;
@@ -84,7 +84,7 @@ class ClosedBooks3D {
   }
   overlapping(a,b) {
     // Oriented rectangle SAT, with a small inset so edge touches do not stack.
-    const corners=m=>[[-159,-224],[159,-224],[159,224],[-159,224]].map(([x,z])=>this.world(m,x,0,z));
+    const corners=m=>[[-1,-1],[1,-1],[1,1],[-1,1]].map(([x,z])=>this.world(m,x*(m.width/2-1),0,z*(m.length/2-1)));
     const ac=corners(a),bc=corners(b);
     for(const angle of [a.angle,b.angle])for(const offset of [0,Math.PI/2]){
       const x=Math.cos(angle+offset),z=-Math.sin(angle+offset);
@@ -289,7 +289,7 @@ class ClosedBooks3D {
     this.faces.sort((a,b)=>b.depth-a.depth);
     for(const face of this.faces){p.save();p.globalAlpha*=this.faceOpacity?.(face)??1;this.textured(face);p.restore();}
     if(this.table&&this.selected&&!this.noSelection){
-      const m=this.selected,vertices=m.shelved?[[-166,0,-231],[-166,m.height,-231],[-166,m.height,231],[-166,0,231]]:[[-166,m.height+1,-231],[166,m.height+1,-231],[166,m.height+1,231],[-166,m.height+1,231]];
+      const m=this.selected,w=m.width/2+6,l=m.length/2+6,vertices=m.shelved?[[-w,0,-l],[-w,m.height,-l],[-w,m.height,l],[-w,0,l]]:[[-w,m.height+1,-l],[w,m.height+1,-l],[w,m.height+1,l],[-w,m.height+1,l]];
       const outline=vertices.map(v=>this.project(this.world(m,...v)));
       p.save();p.strokeStyle='#cbb580';p.lineWidth=1.5;p.setLineDash([5,5]);p.beginPath();outline.forEach((v,i)=>i?p.lineTo(v.x,v.y):p.moveTo(v.x,v.y));p.closePath();p.stroke();p.restore();
     }

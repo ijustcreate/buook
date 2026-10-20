@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.28 — 2026-10-20
+
+- Lift keepsakes directly from the page into a transparent, centered inspection view, with floating labels/actions, restrained shadows and an animated return to the original placement.
+- Persist the inspected side, tape and insert placement across book switches, copies and reloads. Tape short, translucent strips to item-sized side/diagonal/edge placements; keep the taped side visible.
+- Default bundled PDF editions to their source trim proportions. Add source, portrait, trade, square and custom page shapes; preserve glyph and illustration proportions without changing saved art coordinates.
+- Center Inferno verse columns while keeping individual lines left-aligned and sparse pages at the edition’s fixed font size.
+- Replace chapter-jump teleporting with bounded, complete page-bundle turns, quiet local paper/woosh sounds and optional subpixel book movement. Respect reduced-motion preferences and retain sound/movement switches.
+- Add insert-lift, return/flip/tape persistence, mobile placement, format/copy persistence, complete chapter-turn and offline audio-level regression checks.
+
 ## 1.0.27 — 2026-10-20
 
 - Replace the old catch-all page form with a page workshop: all-page navigation/search, live flat preview, composition-specific text/title/contents/verse controls, typography and illustration tabs, local autosave, per-page undo and source restore.

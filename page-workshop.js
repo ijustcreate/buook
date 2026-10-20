@@ -107,6 +107,8 @@ $('#workshop-undo').onclick=()=>{const state=workshopUndo.get(selectedEditPage);
 $('#workshop-reset').onclick=()=>{if(!confirm('Restore this page from the bundled edition? Your other pages stay unchanged. Undo this page can recover the current workshop session’s starting version.'))return;delete bookContent.pages[selectedEditPage];workshopPersist();workshopSelect(selectedEditPage);};
 document.querySelectorAll('[data-workshop-tab]').forEach(button=>button.onclick=()=>{for(const b of document.querySelectorAll('[data-workshop-tab]')){const active=b===button;b.setAttribute('aria-selected',String(active));$('#workshop-'+b.dataset.workshopTab).hidden=!active;}});
 initPageArtTools();
+initBookFeelControls();
+initBookFormatControls();
 const imageStyle=document.createElement('label');imageStyle.textContent='Imported image treatment';const imageStyleSelect=document.createElement('select');imageStyleSelect.id='workshop-image-style';imageStyleSelect.append(new Option('Pixel ink · remove white paper','pixel-ink'),new Option('Leave image original','original'));imageStyle.append(imageStyleSelect);$('#workshop-media').prepend(imageStyle);
 $('#page-image-file').onchange=async e=>{
   const file=e.target.files[0];if(!file)return;

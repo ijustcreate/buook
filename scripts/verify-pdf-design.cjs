@@ -8,7 +8,7 @@ const {chromium,_electron}=require('playwright'),assert=require('node:assert/str
     if(!profile)await page.goto(process.argv[2]||'http://127.0.0.1:4174/');await page.waitForFunction(()=>loaded);
     const set=async(id,spreadIndex)=>page.evaluate(({id,spreadIndex})=>{openSavedBook('starter-'+id);$('#shelf').close();closedEdge=null;coverMotion=null;motion=null;spread=spreadIndex;updateControls();draw();},{id,spreadIndex});
     await set('frankenstein',0);await page.screenshot({path:path.join(output,'centered-title.png')});
-    const title=await page.evaluate(()=>{const c=document.createElement('canvas').getContext('2d'),calls=[];c.fillText=(text,x,y)=>calls.push({text,x,y,align:c.textAlign});drawSourceTitle(c,bookPage(0).titlePage);return calls;});
+    const title=await page.evaluate(()=>{const c=document.createElement('canvas').getContext('2d'),calls=[];c.fillText=(text,x,y)=>{const t=c.getTransform();calls.push({text,x:t.a*x+t.e,y:t.d*y+t.f,align:c.textAlign});};drawSourceTitle(c,bookPage(0).titlePage);return calls;});
     assert(title.length>=2&&title.every(c=>c.x===200&&c.align==='center'));
     await set('frankenstein',2);await page.screenshot({path:path.join(output,'frankenstein-contents.png')});
     const contents=await page.evaluate(()=>({total:sectionPages().length,rows:[2,3,4].map(n=>bookPage(n).tocRows),layout:[2,3,4].map(n=>sourceContentsLayout(n))}));

@@ -161,6 +161,8 @@ node scripts/verify-fonts.cjs http://127.0.0.1:4174/
 node scripts/verify-classic-library.cjs http://127.0.0.1:4174/
 node scripts/verify-pdf-design.cjs http://127.0.0.1:4174/
 node scripts/verify-consistent-type.cjs http://127.0.0.1:4174/
+node scripts/verify-insert-lift.cjs
+node scripts/verify-book-feel-formats.cjs
 node scripts/verify-shelf-spines.cjs http://127.0.0.1:4174/
 node scripts/verify-edge-bookmarks.cjs http://127.0.0.1:4174/
 ```

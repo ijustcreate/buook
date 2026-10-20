@@ -71,7 +71,7 @@ def main():
     novel={'id':'inferno-dore','name':'Inferno · Illustrated','author':'Dante Alighieri · H. F. Cary','outside':'#70372d',
            'source':URL,'sourcePages':len(text_pages),'textPages':text_pages,'preserveLines':True,
            'chapters':[{'page':c['page'],'title':c['label']} for c in contents],
-           'design':{'format':{'widthPt':432,'heightPt':648},'contents':contents,'pages':pages},
+           'design':{'format':{'widthPt':553,'heightPt':734},'contents':contents,'pages':pages},
            'provenance':{'url':URL,'htmlSha256':hashlib.sha256(html).hexdigest(),'scope':'Inferno only; 34 cantos',
                          'pagination':'New illustrated HTML edition; 22 verse lines per text page, plates in source sequence.',
                          'sourceScanAlternative':'infernotranslate00dantuoft_bw.pdf','illustrations':len(figures),'verseLines':total_lines}}

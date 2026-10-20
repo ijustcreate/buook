@@ -28,6 +28,8 @@ const INK_GLYPHS = {
 };
 
 function ink(p,text,x,y,size=2,hand='keeper') {
+  const widthScale=p.pageTextAdapter?p.pageTextScale:1;
+  p.save();p.translate(x,y);p.scale(1/widthScale,1);x=0;y=0;
   const letters=String(text).toUpperCase().replace(/[’‘]/g,"'").replace(/[—–]/g,'-');
   let pen=x;
   [...letters].forEach((letter,index)=>{
@@ -41,5 +43,5 @@ function ink(p,text,x,y,size=2,hand='keeper') {
     }));
     pen+=size*6;
   });
-  return pen-x;
+  p.restore();return (pen-x)/widthScale;
 }

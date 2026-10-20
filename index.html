@@ -6,7 +6,7 @@
   <title>Pixel Book</title>
   <meta name="description" content="Pixel Book — editable pixel-art books with turning pages, a 3D book table and a locally saved shelf.">
   <link rel="icon" type="image/png" href="assets/buook-icon-v1.png">
-  <link rel="stylesheet" href="style.css?v=30">
+  <link rel="stylesheet" href="style.css?v=31">
 </head>
 <body>
   <main>
@@ -112,13 +112,14 @@
     <article id="reading-text" tabindex="0" aria-label="Readable page text"></article>
   </dialog>
   <dialog id="inspect" aria-labelledby="item-title">
-    <button id="close-item" aria-label="Close inspection">×</button>
-    <p class="item-kicker">TUCKED BETWEEN THE PAGES</p>
+    <div id="insert-focus">
+    <button id="close-item" aria-label="Put insert back">×</button>
     <h2 id="item-title"></h2>
     <canvas id="item-art" width="360" height="280" aria-label="Inspected keepsake"></canvas>
-    <p id="item-description"></p>
+    <div class="insert-detail"><p id="item-description"></p>
     <p id="mount-status" aria-live="polite"></p>
-    <div class="item-actions"><button id="flip-item">Turn over ↻</button><button id="tape-item">Tape in place</button></div>
+    </div><div class="item-actions"><button id="flip-item">Flip ↻</button><button id="tape-item">Tape down</button></div>
+    </div>
   </dialog>
   <dialog id="shelf" aria-labelledby="shelf-title">
     <button id="close-shelf" aria-label="Close shelf">×</button>
@@ -127,14 +128,16 @@
     <div id="shelf-books" class="shelf-books"></div>
     <div class="shelf-actions"><button id="save-copy" type="button">Save a copy</button><button id="shelf-table" type="button">Arrange in 3D</button><button id="close-shelf-action" type="button">Close</button></div>
   </dialog>
-  <script src="ink.js?v=8"></script>
-  <script src="closed-books-3d.js?v=6"></script>
+  <script src="book-formats.js?v=1"></script>
+  <script src="ink.js?v=9"></script>
+  <script src="closed-books-3d.js?v=7"></script>
   <script src="starter-library.js?v=6"></script>
   <script src="book-fonts.js?v=2"></script>
   <script src="spine-ornaments.js?v=1"></script>
-  <script src="book-art.js?v=1"></script>
-  <script src="script.js?v=61"></script>
-  <script src="reader-ui.js?v=5"></script>
-  <script src="page-workshop.js?v=1"></script>
+  <script src="book-art.js?v=2"></script>
+  <script src="book-feel.js?v=1"></script>
+  <script src="script.js?v=63"></script>
+  <script src="reader-ui.js?v=6"></script>
+  <script src="page-workshop.js?v=2"></script>
 </body>
 </html>
