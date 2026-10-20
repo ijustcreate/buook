@@ -2235,6 +2235,23 @@ function bridgeCoverPose(edge,amount) {
     source:[coverPoint(seam,0),coverPoint(outer,0),coverPoint(outer,565),coverPoint(seam,565)],
     tx:(CX-closedCenter)*amount,ty:-20*smooth((amount-.72)/.28)};
 }
+function bridgeBindingPoint(pose,u,v,amount){
+  const moving={x:mix(pose.points[0].x,pose.points[3].x,v),y:mix(pose.points[0].y,pose.points[3].y,v)};
+  const fixed=coverPoint(pose.side<0?SPINE_END:BOARD_SEAM,565*v);
+  const left=pose.side<0?moving:fixed,right=pose.side<0?fixed:moving;
+  const a=coverPoint(BOARD_SEAM,565*v),b=coverPoint(SPINE_END,565*v),original=coverPoint(mix(BOARD_SEAM,SPINE_END,u),565*v);
+  // The flexible leather shares both board-edge vertices. Its painted endcap
+  // and the inner lining deform together instead of leaving a frozen spine.
+  return{x:mix(left.x,right.x,u)+(original.x-mix(a.x,b.x,u))*(1-amount),
+    y:mix(left.y,right.y,u)+(original.y-mix(a.y,b.y,u))*(1-amount)};
+}
+function drawBridgeBinding(pose,amount){
+  for(let row=0;row<12;row++)for(let column=0;column<12;column++){
+    const u=column/12,U=(column+1)/12,v=row/12,V=(row+1)/12;
+    quad(assets.binding,[{x:u*assets.binding.width,y:v*assets.binding.height},{x:U*assets.binding.width,y:v*assets.binding.height},{x:U*assets.binding.width,y:V*assets.binding.height},{x:u*assets.binding.width,y:V*assets.binding.height}],
+      [bridgeBindingPoint(pose,u,v,amount),bridgeBindingPoint(pose,U,v,amount),bridgeBindingPoint(pose,U,V,amount),bridgeBindingPoint(pose,u,V,amount)]);
+  }
+}
 function drawBridgeFold(bridge,amount) {
   coverMotion.amount=amount;
   if(amount<=1e-6){ctx.drawImage(bridge.paper,0,0,W,H);return;}
@@ -2243,9 +2260,10 @@ function drawBridgeFold(bridge,amount) {
   ctx.save();ctx.translate(pose.tx,pose.ty);
   // Keep all exposed paper, writing and keepsakes in their original renderer.
   ctx.save();ctx.globalAlpha*=1-smooth((amount-.8)/.2);
+  drawBridgeBinding(pose,amount);
   ctx.beginPath();ctx.rect(-100,-100,W+200,H+200);
   source.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.clip('evenodd');
-  ctx.drawImage(bridge.paper,0,0,W,H);ctx.restore();
+  ctx.drawImage(bridge.paperNoBinding,0,0,W,H);ctx.restore();
   const layers=closedBookLayers(points,amount);
   if(layers.visibility>0){
     ctx.save();ctx.globalAlpha*=layers.visibility;
@@ -2280,6 +2298,8 @@ function startCoverBridge(edge,closing,sourceScene) {
   stopAuto();drag=null;closedBooks3D.gesture=null;closedBooks3D.dragTarget=null;
   bookTableMode=false;spineView=false;closedEdge=null;spread=edge==='front'?0:spreadCount()-1;
   draw();const paper=spriteSurface(W,H);paper.getContext('2d').imageSmoothingEnabled=false;paper.getContext('2d').drawImage(canvas,0,0,W,H);
+  const coverFrame=assets.frame;assets.frame=assembledCover(assets.board,spriteSurface(assets.binding.width,assets.binding.height));
+  draw();const paperNoBinding=spriteSurface(W,H);paperNoBinding.getContext('2d').drawImage(canvas,0,0,W,H);assets.frame=coverFrame;
   if(closing)restoreClosedScene(scene);
   updateControls();const endRect=stage.getBoundingClientRect();
   bookTableMode=false;spineView=false;closedEdge=null;
@@ -2289,7 +2309,7 @@ function startCoverBridge(edge,closing,sourceScene) {
   const selected=virtual.selected,initialAngle=selected.angle,targetCenter={x:selected.x,y:selected.y+selected.height/2,z:selected.z};
   const project=virtual.project.bind(virtual),targetPose=bridgeCoverPose(edge,1),targetLayers=closedBookLayers(targetPose.points,1);
   const canonical=edge==='front'?targetPose.points:[targetPose.points[1],targetPose.points[0],targetPose.points[3],targetPose.points[2]];
-  const bridge={edge,closing,paper,progress:0,virtual,scene,morph:0,align:0,phase:'3d',
+  const bridge={edge,closing,paper,paperNoBinding,progress:0,virtual,scene,morph:0,align:0,phase:'3d',
     draw(){
       const q=closing?1-this.progress:this.progress;
       if(q>=.45){this.phase='hinge';drawBridgeFold(this,1-sine((q-.45)/.55));return;}

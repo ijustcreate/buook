@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.23 — 2026-10-20
+
+- Deform the flexible binding between the moving cover hinge and stationary board during opening/closing, rather than leaving the open-spine image frozen behind the moving cover.
+- Keep the binding lining and ornate endcap on one shared surface with exact board-edge joins, for front/back and thin/thick books.
+
 ## 1.0.22 — 2026-10-20
 
 - Make Alagard the default book font, including page numbers, title pages, contents and the large-text reader.

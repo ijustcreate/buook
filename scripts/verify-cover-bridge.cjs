@@ -10,7 +10,19 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
   try{
     if(!profile)await page.goto(process.argv[2]||'http://127.0.0.1:4174/');
     await page.waitForFunction(()=>loaded,null,{timeout:60000});
-    await page.evaluate(()=>$('#shelf').close());
+    const binding=await page.evaluate(()=>{
+      $('#shelf').close();let error=0;
+      for(const pages of [8,28,268,510])for(const edge of ['front','back'])for(const amount of [0,.1,.25,.5,.75,.9,1]){
+        pageCount=pages;spread=edge==='front'?0:spreadCount()-1;
+        const pose=bridgeCoverPose(edge,amount);
+        for(let i=0;i<=12;i++){
+          const v=i/12,moving=bridgeBindingPoint(pose,pose.side<0?0:1,v,amount),fixed=bridgeBindingPoint(pose,pose.side<0?1:0,v,amount);
+          const expected={x:mix(pose.points[0].x,pose.points[3].x,v),y:mix(pose.points[0].y,pose.points[3].y,v)},other=coverPoint(pose.side<0?SPINE_END:BOARD_SEAM,v*565);
+          error=Math.max(error,Math.hypot(moving.x-expected.x,moving.y-expected.y),Math.hypot(fixed.x-other.x,fixed.y-other.y));
+        }
+      }
+      openSavedBook('starter-frankenstein');return{maximumJoinError:error,pageCounts:[8,28,268,510]};
+    });assert(binding.maximumJoinError<.0001);
     const results=[];
     for(const edge of ['front','back']){
       await page.evaluate(edge=>{
@@ -24,7 +36,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
         const now=ctx.getImageData(0,0,canvas.width,canvas.height).data;let changed=0;for(let i=0;i<now.length;i+=4)if(Math.abs(now[i]-bridgeBefore[i])+Math.abs(now[i+1]-bridgeBefore[i+1])+Math.abs(now[i+2]-bridgeBefore[i+2])+Math.abs(now[i+3]-bridgeBefore[i+3])>12)changed++;
         return changed/(now.length/4);
       });assert.ok(first<.005,`First ${edge} frame jumped: ${first}`);
-      for(const progress of [.1,.3,.449,.451,.65,.85,1]){
+      for(const progress of [.1,.3,.449,.451,.65,.75,.85,1]){
         await page.evaluate(progress=>bridgeFrames.shift()(testBridge.start+testBridge.duration*progress),progress);
         await capture(`${edge}-open-${progress}`);
       }
@@ -76,6 +88,6 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
         results.push({direction,before,after,page:itemMounts.get(item.sheet).pageNumber});
       }return results;
     });
-    assert.deepEqual(errors,[]);console.log(JSON.stringify({results,tableReturn,hits,collisions,errors,output}));
+    assert.deepEqual(errors,[]);console.log(JSON.stringify({binding,results,tableReturn,hits,collisions,errors,output}));
   }finally{await browser.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;});
