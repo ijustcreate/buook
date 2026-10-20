@@ -6,11 +6,11 @@
   <title>Pixel Book</title>
   <meta name="description" content="Pixel Book — editable pixel-art books with turning pages, a 3D book table and a locally saved shelf.">
   <link rel="icon" type="image/png" href="assets/buook-icon-v1.png">
-  <link rel="stylesheet" href="style.css?v=26">
+  <link rel="stylesheet" href="style.css?v=27">
 </head>
 <body>
   <main>
-    <div class="library-toolbar"><button id="shelf-open">My shelf</button><button id="contents-open">Contents</button><button id="read-text">Read text</button><span id="reader-book-name"></span></div>
+    <div class="library-toolbar"><button id="shelf-open">My shelf</button><button id="contents-open">Contents</button><button id="read-text">Read text</button><label class="font-control">Book font <select id="book-font" aria-label="Book font"><option value="original">Original page fonts</option></select></label><button id="add-fonts">Add fonts…</button><input id="font-files" type="file" accept=".ttf,.otf" multiple hidden><span id="reader-book-name"></span></div>
     <header><span>THE ARCHIVE</span><h1>A keeper’s book</h1></header>
     <div class="book-stage">
       <canvas id="book" width="1000" height="680" aria-label="Interactive book. Drag a page corner or use the arrow buttons to turn pages." tabindex="0"></canvas>
@@ -101,7 +101,7 @@
   </dialog>
   <dialog id="reading-view" aria-labelledby="reading-title">
     <div class="reader-dialog-heading"><div><h2 id="reading-title"></h2><p id="reading-folio"></p></div><button id="reading-close">Back to book</button></div>
-    <div class="reading-tools"><button id="reading-previous">← Previous page</button><label>Text size <input id="reading-size" type="range" min="18" max="34" step="1" value="22"><output id="reading-size-value">22 px</output></label><button id="reading-next">Next page →</button></div>
+    <div class="reading-tools"><button id="reading-previous">← Previous page</button><label>Font <select id="reading-font" aria-label="Reading font"><option value="original">Original page fonts</option></select></label><label>Text size <input id="reading-size" type="range" min="18" max="34" step="1" value="22"><output id="reading-size-value">22 px</output></label><button id="reading-next">Next page →</button></div>
     <article id="reading-text" tabindex="0" aria-label="Readable page text"></article>
   </dialog>
   <dialog id="inspect" aria-labelledby="item-title">
@@ -123,7 +123,8 @@
   <script src="ink.js?v=8"></script>
   <script src="closed-books-3d.js?v=4"></script>
   <script src="starter-library.js?v=3"></script>
-  <script src="script.js?v=51"></script>
-  <script src="reader-ui.js?v=1"></script>
+  <script src="book-fonts.js?v=1"></script>
+  <script src="script.js?v=52"></script>
+  <script src="reader-ui.js?v=2"></script>
 </body>
 </html>

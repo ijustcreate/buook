@@ -3,6 +3,7 @@ node_modules/
 release/
 dist/
 .site-publish/
+assets/local-fonts/
 out/
 coverage/
 test-results/

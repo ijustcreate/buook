@@ -1,19 +1,19 @@
 'use strict';
 const readingPageCount=()=>bookContent.sourcePageCount||pageCount;
 function setBookResolution(){
-  PIXEL_SCALE=bookContent.starterId?1.5:.64;
+  PIXEL_SCALE=bookContent.starterId||hasBookFont()?1.5:.64;
   canvas.width=Math.round(W*PIXEL_SCALE);canvas.height=Math.round(H*PIXEL_SCALE);
   ctx.setTransform(PIXEL_SCALE,0,0,PIXEL_SCALE,0,0);
-  canvas.classList.toggle('clear-type',!!bookContent.starterId);
+  canvas.classList.toggle('clear-type',!!bookContent.starterId||hasBookFont());
   textures.clear();shadedTextures.clear();
 }
 function layoutNovelText(text,p){
   const words=String(text).trim().split(/\s+/).filter(Boolean);
   for(let size=14;size>=4;size-=.25){
-    p.font=size+'px Georgia';const lines=[];let line='';
+    p.font=size+'px '+bookFontFamily();const lines=[];let line='';
     for(const word of words){const next=line?line+' '+word:word;if(line&&p.measureText(next).width>304){lines.push(line);line=word;}else line=next;}
     if(line)lines.push(line);
-    const lineHeight=size*1.4;
+    const metrics=p.measureText('Agjy'),lineHeight=Math.max(size*1.4,metrics.actualBoundingBoxAscent+metrics.actualBoundingBoxDescent+2);
     if(lines.length*lineHeight<=274||size===4)return{size,lineHeight,lines};
   }
 }
@@ -55,6 +55,7 @@ function showContents(){
   $('#contents-dialog').showModal();
 }
 function renderReadingPage(){
+  syncBookFontControls();
   readerPage=clamp(readerPage,0,readingPageCount()-1);const data=bookPage(readerPage),base=entries[readerPage%entries.length];
   const article=$('#reading-text');article.replaceChildren();
   if(!data.novel){const h=document.createElement('h3');h.textContent=data.title??base[1];article.append(h);}

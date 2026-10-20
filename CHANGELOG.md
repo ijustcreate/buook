@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.19 — 2026-10-20
+
+- Add live book-wide font selectors above the book and inside the large-text reader, with per-book persistence and an Original page fonts reset.
+- Load all 25 supplied TTF/OTF fonts; preserve glyph artwork and license metadata, with compatibility repairs to two invalid character maps.
+- Bundle all 25 supplied fonts in both prototype builds with existing notices intact; add private persistent browser font imports for additional files.
+- Refit text using each font's measurements without changing source PDF page counts or dropping words.
+- Smooth binding rolls across partial and full stacks with continuous hinge-to-flat tangents, and remove dark atlas end caps from the shared side/bottom paper-edge mapping.
+
 ## 1.0.18 — 2026-10-20
 
 - Restore PDF-aligned pagination: Dracula 509 pages and Frankenstein 268, retaining blank source pages and excluding a blank binding reverse from reading counts.

@@ -55,6 +55,7 @@ async function load() {
     return;
   }
   try {
+    await loadBookFonts();
     await loadStarterLibrary();
     seedStarterBooks();
     migrateStarterEditions();pageCount=bookContent.pageCount;setBookResolution();
@@ -146,7 +147,7 @@ const entries = [
 function loadBookContent() {
   try {
     const saved=JSON.parse(localStorage.getItem(contentKey)||'{}');
-    return {starterId:saved.starterId||null,edition:saved.edition,sourcePageCount:saved.sourcePageCount,name:saved.name||'The Keeper’s Book',pageCount:saved.pageCount||28,pages:saved.pages||{},edgeBookmarks:Array.isArray(saved.edgeBookmarks)?saved.edgeBookmarks:[],covers:{front:{},back:{},...(saved.covers||{})},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold',...(saved.palette||{})}};
+    return {bookFont:saved.bookFont||'original',starterId:saved.starterId||null,edition:saved.edition,sourcePageCount:saved.sourcePageCount,name:saved.name||'The Keeper’s Book',pageCount:saved.pageCount||28,pages:saved.pages||{},edgeBookmarks:Array.isArray(saved.edgeBookmarks)?saved.edgeBookmarks:[],covers:{front:{},back:{},...(saved.covers||{})},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold',...(saved.palette||{})}};
   } catch { return {name:'The Keeper’s Book',pageCount:28,pages:{},covers:{front:{},back:{}},palette:{outside:'#9b382d',inside:'#c85e68',metal:'gold'}}; }
 }
 
@@ -292,7 +293,7 @@ function viewport(number) {
   const key = number+':'+blank+':'+hand+':'+$('#margin-note').value+':'+JSON.stringify(custom);
   if(textures.has(key)) return textures.get(key);
   const surface = document.createElement('canvas');
-  const resolution=custom.novel?2:1;
+  const resolution=custom.novel||hasBookFont()?2:1;
   surface.width = PAGE_W*resolution; surface.height = PAGE_H*resolution;surface.pageViewport=true;
   const p = surface.getContext('2d');
   p.scale(resolution,resolution);
@@ -303,11 +304,11 @@ function viewport(number) {
   const paperTints={ivory:'rgba(255,247,218,.12)',aged:'rgba(202,147,82,.13)'};
   if(paperTints[custom.paper]){p.save();p.globalCompositeOperation='source-atop';p.fillStyle=paperTints[custom.paper];p.fillRect(0,0,PAGE_W,PAGE_H);p.restore();}
   if(!blank) {
-    const font=custom.font||'pixel',inkColor=custom.ink||'#5b3e2d';
+    const font=hasBookFont()?'book':custom.font||'pixel',inkColor=custom.ink||'#5b3e2d';
     const role=pageRole(number),title=custom.title??entry[1];
     if(custom.novel){
       const layout=layoutNovelText(custom.body||'',p);
-      p.fillStyle=custom.ink||'#302019';p.font=layout.size+'px Georgia';p.textBaseline='top';
+      p.fillStyle=custom.ink||'#302019';p.font=layout.size+'px '+bookFontFamily();p.textBaseline='top';
       layout.lines.forEach((line,i)=>p.fillText(line,45,38+i*layout.lineHeight));
       drawPageNumber(p,number,custom.pageNumberPlacement||'bottom-center',hand);
     } else if(role==='contents') {
@@ -356,7 +357,7 @@ function viewport(number) {
 }
 
 function drawPageText(p,text,x,y,width,font,size,color,lineHeight) {
-  const family=font==='serif'?'Georgia,serif':'ui-monospace,monospace';
+  const family=font==='book'?bookFontFamily():font==='serif'?'Georgia,serif':'ui-monospace,monospace';
   p.save();p.fillStyle=color;p.font=`${font==='serif'?'italic ':''}${size}px ${family}`;p.textBaseline='top';
   let line='',lineY=y;
   for(const paragraph of String(text).split('\n')) {
@@ -467,15 +468,20 @@ const pageBlockDepth=amount=>{
   // has no underlying block; the second leaf introduces the first layer.
   return 34*clamp((clamp(amount)*leaves-1)/(leaves-1))*pageThickness();
 };
-const bindingRoll=amount=>smooth((clamp(amount)-.78)/.22);
-const bindingRise=(amount,u)=>mix(smooth(u/.24),Math.sin(Math.PI/2*clamp(u/.32)),bindingRoll(amount));
-const layerDepth=(amount,u)=>pageBlockDepth(amount)*mix(.22,1,bindingRise(amount,u));
+const bindingRoll=amount=>.65+.35*smooth((clamp(amount)-.70)/.30);
+const bindingRadius=amount=>.24+.10*smooth(amount);
+const bindingRise=(amount,u)=>{
+  const t=clamp(u/bindingRadius(amount));
+  return mix(smooth(t),Math.sin(Math.PI/2*t),bindingRoll(amount));
+};
+const bindingHingeDepth=amount=>pageBlockDepth(Math.min(clamp(amount),1-clamp(amount)))*.22;
+const layerDepth=(amount,u)=>mix(bindingHingeDepth(amount),pageBlockDepth(amount),bindingRise(amount,u));
 
 // One shared profile controls both the leaf and the block underneath it. The
 // stack sits on the board; adding pages raises its surface rather than pushing
 // a separate side strip down through the corner hardware.
 function resting(side, amount) {
-  const depth=pageBlockDepth(amount),chain=[{x:0,z:elevationZ(depth*.22),u:0}];
+  const chain=[{x:0,z:elevationZ(bindingHingeDepth(amount)),u:0}];
   let x=0;
   for(let i=0;i<SEGMENTS;i++) {
     const u=(i+1)/SEGMENTS;
@@ -484,7 +490,10 @@ function resting(side, amount) {
     x+=Math.sqrt(Math.max(segment*segment*.25,segment*segment-dz*dz));
     // At a full block the endpaper rolls down into the hinge, with a steep
     // binding tangent that eases into the flat leaf, rather than a flat seam.
-    const rolledX=u<.32?PAGE_W*.32*(1-Math.cos(Math.PI/2*u/.32)):PAGE_W*u;
+    // Zero horizontal tangent at the hinge, then unit tangent at the flat
+    // leaf. Unlike a quarter-circle parametrization, this joins C1 smoothly.
+    const radius=bindingRadius(amount),t=clamp(u/radius);
+    const rolledX=u<radius?PAGE_W*radius*t*t*(2-t):PAGE_W*u;
     chain.push({x:side*mix(x,rolledX,bindingRoll(amount)),z,u});
   }
   return chain;
@@ -721,20 +730,28 @@ function stacks(chain,side,amount,number=side>0?0:1) {
   // The vertical fore-edge and bottom ribbon meet at the exact same point.
   // Keep the strip's painted curl out of its UV range; the spline supplies
   // the curl, while the flat painted rows supply the individual page layers.
-  const edge=chain.at(-1),et=project(edge,0),eb=project(edge,1);
+  const edge=chain.at(-1),texture=assets.stack;
+  // The sprite's dark end caps are not page layers. Crop them out on both
+  // faces, and share the exact same UV column along their common corner.
+  const stackUV={left:texture.width*.08,right:texture.width*.92,top:texture.height*.10,bottom:texture.height*.90};
+  // Clip the two faces as one continuous L-shaped surface. Triangle overlap
+  // must cover the shared corner, but never extend beyond the outer outline.
+  ctx.save();path([...chain.map(p=>upper(p,1)),upper(edge,0),lower(edge,0),...chain.slice().reverse().map(p=>lower(p,1))]);ctx.clip();
   for(let row=0;row<6;row++){
-    const v0=row/6,v1=(row+1)/6,u0=mix(8,assets.stack.width-8,v0),u1=mix(8,assets.stack.width-8,v1);
-    quad(assets.stack,[{x:u0,y:8},{x:u1,y:8},{x:u1,y:assets.stack.height-8},{x:u0,y:assets.stack.height-8}],
+    const v0=row/6,v1=(row+1)/6,u0=mix(stackUV.left,stackUV.right,v0),u1=mix(stackUV.left,stackUV.right,v1);
+    ctx.fillStyle='#ad7d3d';path([upper(edge,v0),upper(edge,v1),lower(edge,v1),lower(edge,v0)]);ctx.fill();
+    quad(assets.stack,[{x:u0,y:stackUV.top},{x:u1,y:stackUV.top},{x:u1,y:stackUV.bottom},{x:u0,y:stackUV.bottom}],
       [upper(edge,v0),upper(edge,v1),lower(edge,v1),lower(edge,v0)]);
   }
   for(let i=0;i<SEGMENTS;i++) {
     const a=chain[i],b=chain[i+1],pa=upper(a,1),pb=upper(b,1);
     const lowerA=lower(a,1),lowerB=lower(b,1);
-    const u0=mix(8,assets.stack.width-8,a.u),u1=mix(8,assets.stack.width-8,b.u);
+    const u0=mix(stackUV.left,stackUV.right,a.u),u1=mix(stackUV.left,stackUV.right,b.u);
     ctx.fillStyle='#ad7d3d';path([pa,pb,lowerB,lowerA]);ctx.fill();
-    quad(assets.stack,[{x:u0,y:8},{x:u1,y:8},{x:u1,y:assets.stack.height-8},{x:u0,y:assets.stack.height-8}],
+    quad(assets.stack,[{x:u0,y:stackUV.top},{x:u1,y:stackUV.top},{x:u1,y:stackUV.bottom},{x:u0,y:stackUV.bottom}],
       [pa,pb,lowerB,lowerA]);
   }
+  ctx.restore();
 }
 
 function castShadow(turning,receiving) {
@@ -1651,13 +1668,13 @@ function saveBook(copy=false){
   // previous named spine and make the renamed save its own book entry.
   if(book&&book.name!==bookName)book=null;
   if(!book){book={id:crypto.randomUUID(),name:bookName,pageCount,pages:{},covers:{}};savedBooks.push(book);activeBookId=book.id;localStorage.setItem('keepers-book-active',activeBookId);}
-  book.edition=bookContent.edition;book.sourcePageCount=bookContent.sourcePageCount;book.starterId=bookContent.starterId;book.name=bookName;book.pageCount=pageCount;book.pages=structuredClone(bookContent.pages);book.covers=structuredClone(bookContent.covers);book.palette={...bookContent.palette};book.edgeBookmarks=structuredClone(bookContent.edgeBookmarks||[]);book.savedAt=Date.now();
+  book.bookFont=bookContent.bookFont||'original';book.edition=bookContent.edition;book.sourcePageCount=bookContent.sourcePageCount;book.starterId=bookContent.starterId;book.name=bookName;book.pageCount=pageCount;book.pages=structuredClone(bookContent.pages);book.covers=structuredClone(bookContent.covers);book.palette={...bookContent.palette};book.edgeBookmarks=structuredClone(bookContent.edgeBookmarks||[]);book.savedAt=Date.now();
   localStorage.setItem('keepers-book-shelf-v1',JSON.stringify(savedBooks));persistBookContent();$('#status').textContent='Saved to your shelf.';renderShelf();
 }
 function openSavedBook(id,quiet=false){
   const book=savedBooks.find(entry=>entry.id===id);if(!book)return;
   bookTableMode=false;
-  bookName=book.name;bookContent.edition=book.edition;bookContent.sourcePageCount=book.sourcePageCount;bookContent.starterId=book.starterId||null;bookContent.name=book.name;bookContent.pageCount=book.pageCount;pageCount=book.pageCount;setBookResolution();
+  bookName=book.name;bookContent.bookFont=book.bookFont||'original';bookContent.edition=book.edition;bookContent.sourcePageCount=book.sourcePageCount;bookContent.starterId=book.starterId||null;bookContent.name=book.name;bookContent.pageCount=book.pageCount;pageCount=book.pageCount;setBookResolution();syncBookFontControls();
   bookContent.pages=structuredClone(book.pages||{});bookContent.covers={front:{},back:{},...(book.covers||{})};bookContent.palette={outside:'#9b382d',inside:'#c85e68',metal:'gold',...(book.palette||{})};activeBookId=id;localStorage.setItem('keepers-book-active',id);
   $('#book-name').value=bookName;$('#outside-color').value=bookContent.palette.outside;$('#inside-color').value=bookContent.palette.inside;$('#metal-color').value=bookContent.palette.metal;
   bookContent.edgeBookmarks=structuredClone(book.edgeBookmarks||[]);resetSessionInserts();restoreEdgeBookmarks();

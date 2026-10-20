@@ -10,10 +10,10 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
     await page.waitForFunction(()=>document.querySelector('#loading')?.hidden,null,{timeout:15000,polling:100});
     const results=await page.evaluate(()=>{
       const results=[];motion=null;closedEdge=null;coverMotion=null;
-      for(const pages of [8,28,56])for(const side of [-1,1])for(const leaves of [1,2,pages/2]){
+      for(const pages of [8,28,56,510])for(const side of [-1,1])for(const leaves of [1,2,Math.floor(pages/2*.8),pages/2]){
         pageCount=pages;const total=pages/2,amount=leaves/total;spread=side<0?leaves:total-leaves;
         const number=side<0?spread*2-1:spread*2,chain=resting(side,amount),quads=[],original=quad;
-        quad=(image,uv,points,target)=>{quads.push({image,points});return original(image,uv,points,target);};
+        quad=(image,uv,points,target)=>{quads.push({image,uv,points});return original(image,uv,points,target);};
         try{ctx.clearRect(0,0,W,H);stacks(chain,side,amount,number);}finally{quad=original;}
         const paper=quads.filter(q=>q.image===assets.stack),leather=quads.filter(q=>q.image===assets.leather);
         let seamError=0,cornerError=0;
@@ -26,6 +26,9 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
             seamError=Math.max(seamError,Math.hypot(a.x-bottom[i].points[0].x,a.y-bottom[i].points[0].y),Math.hypot(b.x-bottom[i].points[1].x,b.y-bottom[i].points[1].y));
           }
           const fore=paper[5].points[2],corner=bottom.at(-1).points[2];cornerError=Math.hypot(fore.x-corner.x,fore.y-corner.y);
+          const foreUV=paper[5].uv,bottomUV=bottom.at(-1).uv;
+          if(foreUV[1].x!==bottomUV[1].x||foreUV[1].y!==bottomUV[1].y||foreUV[2].x!==bottomUV[2].x||foreUV[2].y!==bottomUV[2].y)throw new Error('Corner textures are discontinuous');
+          if(foreUV[1].x>assets.stack.width*.94)throw new Error('Dark sprite end cap is exposed at corner');
         }
         results.push({pages,side,leaves,depth:pageBlockDepth(amount),paperQuads:paper.length,leatherQuads:leather.length,seamError,cornerError});
       }
@@ -34,6 +37,10 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
     for(const r of results){assert.equal(r.leatherQuads,0);assert(r.seamError<.001&&r.cornerError<.001);if(r.leaves===1){assert.equal(r.depth,0);assert.equal(r.paperQuads,0);}else assert(r.depth>0&&r.paperQuads>0);}
     for(const [label,spreadIndex] of [['first-left',1],['second-left',2],['first-right',13],['second-right',12]]){
       const png=await page.evaluate(index=>{pageCount=28;spread=index;motion=null;draw();return canvas.toDataURL('image/png');},spreadIndex);
+      await fs.writeFile(path.join(output,label+'.png'),Buffer.from(png.split(',')[1],'base64'));
+    }
+    for(const [label,index] of [['novel-right',48],['novel-left',207],['novel-middle',127]]){
+      const png=await page.evaluate(index=>{openSavedBook('starter-dracula');spread=index;motion=null;draw();return canvas.toDataURL();},index);
       await fs.writeFile(path.join(output,label+'.png'),Buffer.from(png.split(',')[1],'base64'));
     }
     console.log(JSON.stringify({output,results}));

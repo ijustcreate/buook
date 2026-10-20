@@ -29,7 +29,10 @@ output { font:12px monospace; min-width:126px; text-align:center; letter-spacing
 .hint { text-align:center; color:#746e62; font:10px/1.5 monospace; margin:10px 0 11px; }
 .hint { display:none; }
 .library-toolbar { position:absolute;top:14px;left:18px;z-index:3; }
-.library-toolbar { display:flex;gap:8px;align-items:center;right:18px; }
+.library-toolbar { display:flex;gap:8px;align-items:center;right:18px;flex-wrap:wrap; }
+.font-control { display:flex;align-items:center;gap:8px;font:12px monospace; }
+.font-control select { max-width:210px; }
+#reading-font { max-width:190px; }
 #reader-book-name { color:#b9a47e;font-size:15px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis; }
 canvas.clear-type { image-rendering:auto; }
 .reader-navigation { display:flex;justify-content:center;align-items:center;gap:22px;flex-wrap:wrap;position:relative;font:13px monospace; }
