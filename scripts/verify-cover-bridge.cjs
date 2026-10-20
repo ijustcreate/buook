@@ -35,7 +35,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
         closedBooks3D.yaw=.8;closedBooks3D.pitch=edge==='front'?.65:-.8;draw();
         window.bridgeBefore=ctx.getImageData(0,0,canvas.width,canvas.height).data;
         window.originalRAF=window.requestAnimationFrame;window.bridgeFrames=[];window.requestAnimationFrame=callback=>{bridgeFrames.push(callback);return bridgeFrames.length;};
-        open3DBook();window.testBridge=coverMotion.bridge;
+        open3DBook();window.testBridge=coverMotion.bridge;bridgeFrames.shift()(0);
       },edge);
       const first=await page.evaluate(()=>{
         const now=ctx.getImageData(0,0,canvas.width,canvas.height).data;let changed=0;for(let i=0;i<now.length;i+=4)if(Math.abs(now[i]-bridgeBefore[i])+Math.abs(now[i+1]-bridgeBefore[i+1])+Math.abs(now[i+2]-bridgeBefore[i+2])+Math.abs(now[i+3]-bridgeBefore[i+3])>12)changed++;
@@ -47,7 +47,7 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
       }
       assert.equal(await page.evaluate(()=>!!coverMotion||!!closedEdge||bookTableMode||spineView),false);
       // Closing returns to precisely the original 3D camera, not a reset pose.
-      await page.evaluate(edge=>{animateCover(edge,true);window.testBridge=coverMotion.bridge;},edge);
+      await page.evaluate(edge=>{animateCover(edge,true);window.testBridge=coverMotion.bridge;bridgeFrames.shift()(0);},edge);
       for(const progress of [0,.2,.5,.8,1]){await page.evaluate(progress=>bridgeFrames.shift()(testBridge.start+testBridge.duration*progress),progress);await capture(`${edge}-close-${progress}`);}
       const returned=await page.evaluate(()=>({yaw:closedBooks3D.yaw,pitch:closedBooks3D.pitch,locked:document.body.classList.contains('book-transitioning'),fixed:document.querySelector('.book-stage').style.position}));
       assert.equal(returned.yaw,.8);assert.equal(returned.pitch,edge==='front'?.65:-.8);assert.equal(returned.locked,false);assert.equal(returned.fixed,'');
@@ -61,9 +61,9 @@ const fs=require('node:fs/promises'),path=require('node:path'),os=require('node:
       toggleBookTable();closedBooks3D.arrange(true);closedBooks3D.yaw=.7;closedBooks3D.pitch=.65;
       closedBooks3D.selected=closedBooks3D.models.find(m=>m.id!==activeBookId);draw();
       const selected=closedBooks3D.selected.id,positions=JSON.stringify(closedBooks3D.models.map(m=>[m.id,m.x,m.y,m.z,m.angle]));
-      open3DBook();let b=coverMotion.bridge;bridgeFrames.shift()(b.start+b.duration);
+      open3DBook();let b=coverMotion.bridge;bridgeFrames.shift()(0);bridgeFrames.shift()(b.start+b.duration);
       if(activeBookId!==selected||coverMotion)throw new Error('Selected table book did not open');
-      animateCover('front',true);b=coverMotion.bridge;bridgeFrames.shift()(b.start+b.duration);
+      animateCover('front',true);b=coverMotion.bridge;bridgeFrames.shift()(0);bridgeFrames.shift()(b.start+b.duration);
       if(!bookTableMode||closedBooks3D.selected.id!==selected||closedBooks3D.yaw!==.7||JSON.stringify(closedBooks3D.models.map(m=>[m.id,m.x,m.y,m.z,m.angle]))!==positions)throw new Error('Table placement jumped on return');
       window.requestAnimationFrame=originalRAF;bookTableMode=false;closedEdge=null;spineView=false;return true;
     });

@@ -29,6 +29,7 @@ function updateBookFormatControls(){
   if(document.activeElement!==document.querySelector('#format-width'))document.querySelector('#format-width').value=Math.round(f.widthPt*25.4/72);
   if(document.activeElement!==document.querySelector('#format-height'))document.querySelector('#format-height').value=Math.round(f.heightPt*25.4/72);
   document.querySelector('#format-verse').checked=f.centerVerse;document.querySelector('#page-format-size').textContent=`${Math.round(f.widthPt*25.4/72)} × ${Math.round(f.heightPt*25.4/72)} mm`;
+  document.querySelector('#format-verse').closest('label').hidden=!Object.values(starterLibrary.get(bookContent.starterId)?.pages||bookContent.pages).some(page=>page.preserveLines&&page.body?.trim());
   for(const id of ['page-format','format-width','format-height','format-verse'])document.querySelector('#'+id).disabled=!!motion||!!coverMotion;
 }
 function initBookFormatControls(){

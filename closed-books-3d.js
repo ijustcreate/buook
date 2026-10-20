@@ -3,7 +3,7 @@
 // A small, dependency-free 3D renderer. Physical boards, paper and spine share
 // world coordinates and one perspective camera; the open renderer is separate.
 class ClosedBooks3D {
-  static thickness(pages){const n=pages||28;return 30+Math.min(n,56)*1.2+42*Math.log1p(Math.max(0,n-56)/220);}
+  static thickness(pages){return 12+Math.min(200,Math.max(0,Number(pages)||28)*.12);}
   constructor({canvas, context, materials, changed, open, storage=localStorage}) {
     Object.assign(this,{canvas,ctx:context,materials,changed,open,storage});
     this.yaw=-Math.PI/2;this.pitch=.43;this.roll=Math.PI/2;this.distance=1050;this.models=[];
@@ -11,8 +11,9 @@ class ClosedBooks3D {
     try {this.layout=JSON.parse(storage.getItem('pixel-book-table-v1')||'{}');} catch {this.layout={};}
     if(!this.layout||Array.isArray(this.layout)||typeof this.layout!=='object')this.layout={};
   }
-  setBooks(books,table=false,selected=null) {
+  setBooks(books,table=false,selected=null,shelfOnly=false) {
     this.table=table;
+    this.shelfOnly=shelfOnly;
     this.models=books.map((book,i)=>{
       const old=table?this.layout[book.id]:null;
       const finite=(key,fallback)=>Number.isFinite(old?.[key])?Math.max(-2000,Math.min(2000,old[key])):fallback;
@@ -23,10 +24,11 @@ class ClosedBooks3D {
     this.selected=this.models.find(m=>m.id===selected)||this.models[0]||null;
     this.placeShelf();this.settle();this.reset();
   }
-  reset(back=false) {this.center=null;this.yaw=this.table?-.35:-Math.PI/2;this.pitch=this.table?.85:(back?-.43:.43);this.roll=this.table?0:Math.PI/2;this.distance=this.table?3200:1050;this.gesture=null;this.changed();}
+  reset(back=false) {this.center=null;this.yaw=this.shelfOnly?0:this.table?-.35:-Math.PI/2;this.pitch=this.shelfOnly?.32:this.table?.85:(back?-.43:.43);this.roll=this.table?0:Math.PI/2;this.distance=this.shelfOnly?Math.max(1500,(this.shelfWidth||1150)*1.3):this.table?3200:1050;this.gesture=null;this.changed();}
   target() {
     if(this.center)return this.center;
     if(!this.models.length)return {x:0,y:0,z:0};
+    if(this.shelfOnly)return this.center={x:0,y:280,z:-850};
     if(this.table)return this.center={x:0,y:170,z:300};
     const bounds=this.models;
     return this.center={x:(Math.min(...bounds.map(m=>m.x))+Math.max(...bounds.map(m=>m.x)))/2,
@@ -44,22 +46,22 @@ class ClosedBooks3D {
     return {x:500+x*c-y*s,y:(this.table?345:332)+x*s+y*c,depth};
   }
   world(m,x,y,z) {
-    if(m.shelved&&this.table)return{x:m.shelfX+y-m.height/2,y:24+m.length/2-z,z:-730-x-m.width/2};
+    if((m.shelved||this.shelfOnly)&&this.table)return{x:m.shelfX+y-m.height/2,y:24+m.length/2-z,z:-730-x-m.width/2};
     const c=Math.cos(m.angle),s=Math.sin(m.angle);return{x:m.x+x*c+z*s,y:m.y+y,z:m.z-x*s+z*c};
   }
   local(m,p){
-    if(m.shelved&&this.table)return{x:-730-p.z-m.width/2,y:p.x-m.shelfX+m.height/2,z:24+m.length/2-p.y};
+    if((m.shelved||this.shelfOnly)&&this.table)return{x:-730-p.z-m.width/2,y:p.x-m.shelfX+m.height/2,z:24+m.length/2-p.y};
     const c=Math.cos(m.angle),s=Math.sin(m.angle),x=p.x-m.x,z=p.z-m.z;return{x:x*c-z*s,y:p.y-m.y,z:x*s+z*c};
   }
   normal(m,n) {
-    if(m.shelved&&this.table)return{x:n[1],y:-n[2],z:-n[0]};
+    if((m.shelved||this.shelfOnly)&&this.table)return{x:n[1],y:-n[2],z:-n[0]};
     return this.world({...m,x:0,y:0,z:0},...n);
   }
   placeShelf(){
-    const books=this.models.filter(m=>m.shelved).sort((a,b)=>a.shelfOrder-b.shelfOrder||a.id.localeCompare(b.id));
+    const books=this.models.filter(m=>m.shelved||this.shelfOnly).sort((a,b)=>a.shelfOrder-b.shelfOrder||a.id.localeCompare(b.id));
     const span=books.reduce((n,m)=>n+m.height+10,0);let x=-span/2;
     for(const m of books){m.shelfX=x+m.height/2;x+=m.height+10;}
-    this.shelfWidth=Math.max(1150,span+100);
+    this.shelfWidth=Math.max(this.shelfOnly?600:1150,span+100);
   }
   moveSelected(toShelf){
     const m=this.selected;if(!this.table||!m)return;
@@ -133,7 +135,7 @@ class ClosedBooks3D {
   pointerDown(p) {
     const face=this.hitFace(p),hit=face?.model;if(hit)this.selected=hit;
     this.dragTarget=this.target();
-    const move=this.table&&this.mode==='move'&&hit&&!hit.shelved;
+    const move=this.table&&!this.shelfOnly&&this.mode==='move'&&hit&&!hit.shelved;
     this.gesture={p,yaw:this.yaw,pitch:this.pitch,move,hit,bookmarkPage:face?.bookmarkPage,moved:false,start:move?this.ground(p,hit.y+hit.height):null,x:hit?.x,z:hit?.z};
     this.changed();return true;
   }
@@ -212,11 +214,11 @@ class ClosedBooks3D {
     const p=this.ctx;this.faces=[];this.projectedModel=null;
     const target=this.dragTarget||this.target();
     // Floor and contact shadows establish scale without flattening the books.
-    if(this.table){
+    if(this.table&&!this.shelfOnly){
       const floor=[[-1400,-1200],[1400,-1200],[1400,1700],[-1400,1700]].map(([x,z])=>this.project({x:x+target.x,y:-3,z:z+target.z}));
       this.poly(floor,'#182023',.5*(this.floorOpacity??1));
       for(const m of this.models.filter(m=>!m.shelved)){const outline=[];for(let i=0;i<40;i++){const a=i*Math.PI/20;outline.push(this.project(this.world({...m,y:0},Math.cos(a)*210,-1,Math.sin(a)*285)));}this.poly(outline,'#000',.30*(this.floorOpacity??1));}
-    }else{p.save();p.globalAlpha*=this.floorOpacity??1;p.fillStyle='rgba(0,0,0,.35)';p.beginPath();p.ellipse(500,560,105,10,0,0,Math.PI*2);p.fill();p.restore();}
+    }else if(!this.shelfOnly){p.save();p.globalAlpha*=this.floorOpacity??1;p.fillStyle='rgba(0,0,0,.35)';p.beginPath();p.ellipse(500,560,105,10,0,0,Math.PI*2);p.fill();p.restore();}
     const basis=this.basis(),eye={x:target.x+basis.toward.x*this.distance,y:target.y+basis.toward.y*this.distance,z:target.z+basis.toward.z*this.distance};
     if(this.table){
       const box=(x,y,z,w,h,d,color)=>{
@@ -289,7 +291,7 @@ class ClosedBooks3D {
     this.faces.sort((a,b)=>b.depth-a.depth);
     for(const face of this.faces){p.save();p.globalAlpha*=this.faceOpacity?.(face)??1;this.textured(face);p.restore();}
     if(this.table&&this.selected&&!this.noSelection){
-      const m=this.selected,w=m.width/2+6,l=m.length/2+6,vertices=m.shelved?[[-w,0,-l],[-w,m.height,-l],[-w,m.height,l],[-w,0,l]]:[[-w,m.height+1,-l],[w,m.height+1,-l],[w,m.height+1,l],[-w,m.height+1,l]];
+      const m=this.selected,w=m.width/2+6,l=m.length/2+6,vertices=m.shelved||this.shelfOnly?[[-w,0,-l],[-w,m.height,-l],[-w,m.height,l],[-w,0,l]]:[[-w,m.height+1,-l],[w,m.height+1,-l],[w,m.height+1,l],[-w,m.height+1,l]];
       const outline=vertices.map(v=>this.project(this.world(m,...v)));
       p.save();p.strokeStyle='#cbb580';p.lineWidth=1.5;p.setLineDash([5,5]);p.beginPath();outline.forEach((v,i)=>i?p.lineTo(v.x,v.y):p.moveTo(v.x,v.y));p.closePath();p.stroke();p.restore();
     }

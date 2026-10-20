@@ -4,7 +4,7 @@ const browser=profile?await _electron.launch({executablePath:process.env.BOOK_QA
 if(profile)await browser.evaluate(({BrowserWindow})=>{for(const w of BrowserWindow.getAllWindows()){w.webContents.setBackgroundThrottling(false);w.setSize(1920,1040);}});
 const page=profile?await browser.firstWindow():await browser.newPage({viewport:{width:1920,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(60000);
 try{if(!profile)await page.goto('http://127.0.0.1:4174/');await page.waitForFunction(()=>loaded);await page.evaluate(()=>{openSavedBook('starter-dracula');spread=6;draw();updateControls();});
- const before=await page.locator('.book-stage').boundingBox();assert.ok(before.width>1500);assert.equal(await page.locator('.library-toolbar button:visible').count(),3);
+ const before=await page.locator('.book-stage').boundingBox();assert.ok(before.width>1500);assert.equal(await page.locator('.library-toolbar button:visible').count(),4);
  await page.screenshot({path:path.join(output,'reading-large.png')});await page.click('#reader-tools-open');await page.waitForSelector('#reader-tools-panel:popover-open');
  const after=await page.locator('.book-stage').boundingBox();assert.deepEqual(after,before);await page.selectOption('#book-font','alagard');
  await page.screenshot({path:path.join(output,'floating-typography.png')});await page.click('#reader-tab-book');assert(await page.locator('#book-name').isVisible());

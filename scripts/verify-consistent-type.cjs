@@ -15,7 +15,7 @@ const {chromium,_electron}=require('playwright'),assert=require('node:assert/str
           if(layout.size!==size)throw new Error('Per-page body font change');
           if(layout.lines.length*layout.lineHeight>region.height+.01)throw new Error(base.name+' overflow on '+(n+1));
           if(layout.lines.join(' ').replace(/\s+/g,' ').trim()!==region.text.replace(/\s+/g,' ').trim())throw new Error('Omitted text');
-          p.font=layout.size+'px '+bookFontFamily();p.fontKerning='none';if(layout.lines.some(line=>p.measureText(line).width>304.5))throw new Error('Horizontal overflow');
+          p.font=layout.size+'px '+bookFontFamily();p.fontKerning='none';if(layout.lines.some((line,i)=>p.measureText(line).width+(layout.indents?.[i]||0)>320.5))throw new Error('Horizontal overflow');
           checked++;
         }
         results.push({name:base.name,size,checked,elapsedMs:Math.round(performance.now()-start)});

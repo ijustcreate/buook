@@ -10,14 +10,15 @@ readerTools.innerHTML=`<div class="reader-panel-heading"><div><small>YOUR READIN
 document.body.append(readerTools);
 const toolbar=$('.library-toolbar'),toolsButton=document.createElement('button');toolsButton.id='reader-tools-open';toolsButton.textContent='Tools';toolsButton.setAttribute('popovertarget',readerTools.id);toolsButton.setAttribute('aria-label','Open reading and book tools');toolsButton.setAttribute('aria-expanded','false');
 const title=$('#reader-book-name');toolbar.append(title,toolsButton);
-for(const node of [$('.font-control'),$('#add-fonts'),$('#font-files'),$('#read-text')])$('#reader-type-slot').append(node);
+for(const node of [$('.font-control'),$('#add-fonts'),$('#font-files')])$('#reader-type-slot').append(node);
 for(const id of ['edit-pages-open','page-art-toggle'])$('#reader-create-slot').append($('#'+id));
 const options=$('.book-options'),controls=$('.reader-tools');options.open=true;controls.open=true;
 $('#reader-book-slot').append(options);$('#reader-panel-tools').append(controls);
 // Keep appearance and mechanical settings in context, using the same inputs.
-for(const id of ['position','speed','autoplay','blank','hand','book-feel-sound','book-feel-movement']){
+for(const id of ['position','speed','autoplay','blank','book-feel-sound','book-feel-movement']){
  const input=$('#'+id);$('#reader-feel-slot').append(input.closest('label')||input);
 }
+$('#hand').closest('label').hidden=true;
 $('#reader-feel-slot').prepend($('.book-format-options'));
 const legacy=$('.content-editor');legacy.open=true;$('#reader-panel-book').append(legacy,$('.keepsakes'),$('.margin-note'));
 const tabs=[...readerTools.querySelectorAll('[data-reader-tab]')];
@@ -30,6 +31,7 @@ for(const id of ['edit-pages-open','page-art-toggle','read-text','close-book','f
 // Turn the existing page indicator into a compact jump affordance.
 const jump=document.createElement('section');jump.id='reader-page-jump';jump.popover='auto';jump.setAttribute('aria-label','Jump to page');jump.append($('.reader-navigation > label'));document.body.append(jump);
 const jumpButton=document.createElement('button');jumpButton.id='reader-jump-open';jumpButton.setAttribute('popovertarget',jump.id);jumpButton.setAttribute('aria-label','Jump to page');jumpButton.append($('#pagination'));$('#next').before(jumpButton);
+const librarySwitch=document.createElement('button');librarySwitch.id='reader-library-switch';librarySwitch.hidden=true;librarySwitch.textContent='Table view';$('.reader-navigation').append(librarySwitch);librarySwitch.onclick=()=>bookShelfMode?toggleBookTable():showBookShelf();
 jump.addEventListener('toggle',event=>{if(event.newState==='open'){$('#go-page').focus();$('#go-page').select();}});
 $('#go-page').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();$('#go-page-button').click();}});
 $('#go-page-button').addEventListener('click',()=>{if(jump.matches(':popover-open'))jump.hidePopover();});

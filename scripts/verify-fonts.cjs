@@ -6,7 +6,7 @@ const {chromium,_electron}=require('playwright'),assert=require('node:assert/str
   const page=profile?await browser.firstWindow():await browser.newPage({viewport:{width:1500,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.setDefaultTimeout(60000);
   try{
     if(!profile)await page.goto(process.argv[2]||'http://127.0.0.1:4174/');await page.waitForFunction(()=>loaded);
-    const count=await page.evaluate(()=>bookFonts.size);assert.equal(count,25);
+    const count=await page.evaluate(()=>bookFonts.size);assert.equal(count,28);
     await page.evaluate(()=>{openSavedBook('starter-dracula');spread=50;updateControls();draw();});
     const original=await page.evaluate(()=>canvas.toDataURL());
     const tested=await page.evaluate(async()=>{
@@ -17,7 +17,7 @@ const {chromium,_electron}=require('playwright'),assert=require('node:assert/str
         const fonts=[],fake={save(){},restore(){},fillText(){fonts.push(this.font);}};
         drawPageNumber(fake,100,'bottom-center','keeper');
         if(!fonts[0]?.includes(font.family))throw new Error('Folio font does not match: '+font.label);
-        if(layout.lines.length*layout.lineHeight>274.01)throw new Error('Font overflows source page: '+font.label);
+        if(layout.lines.length*layout.lineHeight>282.01)throw new Error('Font overflows source page: '+font.label);
         if(layout.lines.join(' ').replace(/\s+/g,' ').trim()!==dense.replace(/\s+/g,' ').trim())throw new Error('Font switch lost text: '+font.label);
         if(readingPageCount()!==509||pageCount!==510)throw new Error('Font switch changed PDF pagination');
         result.push({font:font.label,size:layout.size});

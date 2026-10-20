@@ -20,7 +20,7 @@ function fontDatabase(){
   return new Promise((resolve,reject)=>{const request=indexedDB.open('pixel-book-fonts-v1',1);request.onupgradeneeded=()=>request.result.createObjectStore('files',{keyPath:'id'});request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
 }
 async function loadBookFonts(){
-  const publicFonts=await fetch('assets/fonts/manifest.json').then(r=>r.json());
+  const publicFonts=await fetch('assets/fonts/manifest.json?v=2').then(r=>r.json());
   const entries=[...publicFonts];
   await Promise.allSettled(entries.map(entry=>registerBookFont(entry)));
   try{

@@ -3,9 +3,18 @@
 // saved there, so full novels don't consume the browser's shelf quota.
 const starterLibrary=new Map();
 const sourceIllustrations=new Map();
+let sourceInkTreatments={};
+function refineSourceFigure(figure){
+  if(figure.recipe?.version===3)return figure;
+  const upgrade=sourceInkTreatments[figure.originalSrc||figure.src];if(!upgrade)return figure;
+  const useOriginal=!!figure.originalSrc&&figure.src===figure.originalSrc;
+  Object.assign(figure,upgrade,{src:useOriginal?upgrade.originalSrc:upgrade.processedSrc});return figure;
+}
 async function loadStarterLibrary(){
   const designResponse=await fetch('assets/book-designs.json?v=2');if(!designResponse.ok)throw new Error('Book design metadata could not be loaded');
   const designs=await designResponse.json();
+  sourceInkTreatments=await fetch('assets/book-illustration-treatments.json?v=1').then(r=>r.json());
+  const compositions=await fetch('assets/book-composition.json?v=1').then(r=>r.json());
   const responses=await Promise.all(['assets/starter-novels.json?v=2','assets/classic-library.json?v=1','assets/inferno-dore.json?v=1'].map(url=>fetch(url)));
   if(responses.some(response=>!response.ok))throw new Error('Starter library could not be loaded');
   const novels=(await Promise.all(responses.map(response=>response.json()))).flat(),p=document.createElement('canvas').getContext('2d');
@@ -39,6 +48,8 @@ async function loadStarterLibrary(){
       if(design.contents.length)starterLibrary.get(novel.id).contents=design.contents;
       for(const [number,data] of Object.entries(design.pages))Object.assign(pages[number],data);
     }
+    for(const [number,data] of Object.entries(compositions[novel.id]?.pages||{}))if(pages[number])Object.assign(pages[number],data);
+    for(const page of Object.values(pages))for(const figure of page.sourceFigures||[])refineSourceFigure(figure);
     if(novel.chapters)continue;
     // Preserve the former base text for any edits/bookmarks on old numbering.
     const old={},tocPages=Math.max(1,Math.ceil(chapters.length/9)),start=1+tocPages;

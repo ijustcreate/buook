@@ -1,38 +1,43 @@
 'use strict';
 const readingPageCount=()=>bookContent.sourcePageCount||pageCount;
 function setBookResolution(){
-  PIXEL_SCALE=bookContent.starterId||hasBookFont()?1.5:.64;
+  PIXEL_SCALE=bookContent.starterId||hasBookFont()?(typeof bookFocusSide!=='undefined'&&bookFocusSide!==null?2:1.5):.64;
   canvas.width=Math.round(W*PIXEL_SCALE);canvas.height=Math.round(H*PIXEL_SCALE);
   ctx.setTransform(PIXEL_SCALE,0,0,PIXEL_SCALE,0,0);
   canvas.classList.toggle('clear-type',!!bookContent.starterId||hasBookFont());
   textures.clear();shadedTextures.clear();
 }
 const measuredWordWidths=new Map(),bookBodySizes=new Map();
-function layoutNovelText(text,p,preserveLines=false,height=274,fixedSize=null){
+function layoutNovelText(text,p,preserveLines=false,height=282,fixedSize=null,composition=null){
   adaptPageTextContext(p);
-  const paragraphs=(preserveLines?String(text).trim().split(/\n/):String(text).trim().split(/\n\s*\n/)).map(line=>line.trim().split(/\s+/).filter(Boolean));
+  const starts=composition?.paragraphStarts,words=String(text).trim().split(/\s+/).filter(Boolean);
+  const paragraphs=starts?.length?[0,...starts.filter(n=>n>0&&n<words.length),words.length].slice(0,-1).map((from,i,all)=>words.slice(from,i+1<all.length?all[i+1]:words.length)):
+    (preserveLines?String(text).trim().split(/\n/):String(text).trim().split(/\n\s*\n/)).map(line=>line.trim().split(/\s+/).filter(Boolean));
+  const bodyWidth=composition?.width||320;
   function fit(size){
-    p.font=size+'px '+bookFontFamily();p.fontKerning='none';const lines=[];
+    p.font=size+'px '+bookFontFamily();p.fontKerning='none';const lines=[],indents=[];
     const metricKey=p.font+':'+bookWidthScale();let widths=measuredWordWidths.get(metricKey);if(!widths){widths=new Map();if(measuredWordWidths.size>=64)measuredWordWidths.delete(measuredWordWidths.keys().next().value);measuredWordWidths.set(metricKey,widths);}
     const width=word=>{if(!widths.has(word))widths.set(word,p.measureText(word).width);return widths.get(word);},space=width(' ');
-    for(const [index,words] of paragraphs.entries()){let line='';
-      if(index&&!preserveLines)lines.push('');
-      let lineWidth=0;
-      for(const word of words){const wordWidth=width(word),next=lineWidth+(line?space:0)+wordWidth;if(line&&next>304){lines.push(line);line=word;lineWidth=wordWidth;}else{line=line?line+' '+word:word;lineWidth=next;}}
-      if(line||preserveLines)lines.push(line);
+    for(const [index,words] of paragraphs.entries()){
+      let line='',indent=!preserveLines&&index?size*1.15/bookWidthScale():0,lineWidth=indent;
+      const push=()=>{lines.push(line);indents.push(indent);line='';indent=0;lineWidth=0;};
+      for(const word of words){const wordWidth=width(word),next=lineWidth+(line?space:0)+wordWidth;if(line&&next>bodyWidth){push();line=word;lineWidth=wordWidth;}else{line=line?line+' '+word:word;lineWidth=next;}}
+      if(line||preserveLines)push();
     }
-    const metrics=p.measureText('Agjy'),lineHeight=Math.max(size*(preserveLines?1.2:1.4),metrics.actualBoundingBoxAscent+metrics.actualBoundingBoxDescent+(preserveLines?.5:2));
-    return{size,lineHeight,lines};
+    const metrics=p.measureText('Agjy'),lineHeight=Math.max(size*(preserveLines?1.24:1.38),metrics.actualBoundingBoxAscent+metrics.actualBoundingBoxDescent+(preserveLines?.5:.8));
+    return{size,lineHeight,lines,indents};
   }
   if(fixedSize!==null)return fit(fixedSize);
-  let low=8,high=56,best=fit(2);
+  let low=8,high=64,best=fit(2);
   while(low<=high){const middle=Math.floor((low+high)/2),layout=fit(middle/4);if(layout.lines.length*layout.lineHeight<=height){best=layout;low=middle+1;}else high=middle-1;}
   return best;
 }
 function novelBodyRegion(data){
-  let text=data.body||'',top=data.sourceFigures?.length&&text.trim()?204:38;
-  if(data.chapterOpening&&text.startsWith(data.chapterOpening)){text=text.slice(data.chapterOpening.length).trim();top=Math.max(top,77);}
-  return{text,top,height:312-top,preserveLines:!!data.preserveLines};
+  let text=data.body||'',top=data.sourceFigures?.length&&text.trim()?198:34,removed=0;
+  if(data.chapterOpening&&text.startsWith(data.chapterOpening)){removed=data.chapterOpening.split(/\s+/).length;text=text.slice(data.chapterOpening.length).trim();top=Math.max(top,65);}
+  const base=starterLibrary.get(bookContent.starterId)?.pages[(data.sourcePage||1)-1];
+  const starts=(!base||data.body===base.body)?data.paragraphStarts:null;
+  return{text,top,height:316-top,preserveLines:!!data.preserveLines,width:320,paragraphStarts:starts?.map(n=>n-removed).filter(n=>n>0)};
 }
 function bookBodyFontSize(p){
   const key=JSON.stringify([bookContent.starterId,selectedBookFont(),pageCount,bookContent.pages,bookWidthScale()]);
@@ -44,12 +49,12 @@ function bookBodyFontSize(p){
   regions.sort((a,b)=>(b.text.length+(b.preserveLines?b.text.split('\n').length*90:0))/b.height-(a.text.length+(a.preserveLines?a.text.split('\n').length*90:0))/a.height);
   let low=8,high=56,best=2;
   while(low<=high){const middle=Math.floor((low+high)/2),size=middle/4;
-    const fits=regions.every(region=>{const layout=layoutNovelText(region.text,p,region.preserveLines,region.height,size);return layout.lines.length*layout.lineHeight<=region.height;});
+    const fits=regions.every(region=>{const layout=layoutNovelText(region.text,p,region.preserveLines,region.height,size,region);return layout.lines.length*layout.lineHeight<=region.height;});
     if(fits){best=size;low=middle+1;}else high=middle-1;
   }
   if(bookBodySizes.size>=8)bookBodySizes.delete(bookBodySizes.keys().next().value);bookBodySizes.set(key,best);return best;
 }
-function layoutBookBody(data,p){const region=novelBodyRegion(data),layout=layoutNovelText(region.text,p,region.preserveLines,region.height,bookBodyFontSize(p));let x=45;if(region.preserveLines&&bookFormat().centerVerse){const width=Math.max(0,...layout.lines.map(line=>p.measureText(line).width));x=(400-width)/2;}return{...layout,top:region.top,x};}
+function layoutBookBody(data,p){const region=novelBodyRegion(data),layout=layoutNovelText(region.text,p,region.preserveLines,region.height,bookBodyFontSize(p),region);let x=40;if(region.preserveLines&&bookFormat().centerVerse){const width=Math.max(0,...layout.lines.map(line=>p.measureText(line).width));x=(400-width)/2;}return{...layout,top:region.top,x};}
 function sourceContentsLayout(number){
   const p=document.createElement('canvas').getContext('2d'),rows=bookPage(number).tocRows||[];
   adaptPageTextContext(p);
@@ -89,24 +94,28 @@ function drawSourceTitle(p,title){
 }
 function drawSourceFigures(p,data){
   const figures=data.sourceFigures||[];if(!figures.length)return 38;
-  const hasText=!!novelBodyRegion(data).text.trim(),top=data.chapterOpening?77:38,available=hasText?Math.min(154,312-top-108):312-top,slot=available/figures.length;
+  const hasText=!!novelBodyRegion(data).text.trim(),top=data.chapterOpening?65:34,available=hasText?Math.min(154,316-top-108):316-top,slot=available/figures.length;
   figures.forEach((figure,index)=>{
     const image=getSourceIllustration(figure.src);if(!image)return;
-    const scale=Math.min(304*bookWidthScale()/figure.width,(slot-8)/figure.height),w=figure.width*scale/bookWidthScale(),h=figure.height*scale;
+    const scale=Math.min(320*bookWidthScale()/image.naturalWidth,(slot-8)/image.naturalHeight),w=image.naturalWidth*scale/bookWidthScale(),h=image.naturalHeight*scale;
     p.drawImage(image,(400-w)/2,top+index*slot+(slot-h)/2,w,h);
   });
   return hasText?top+available+12:top;
 }
 let readerPage=0,readerKey='',preferredReaderPage=null;
 const visibleReaderPage=()=>{
+  if(typeof bookFocusSide!=='undefined'&&bookFocusSide!==null)return clamp(bookFocusSide<0?spread*2-1:spread*2,0,readingPageCount()-1);
   const first=Math.min(Math.max(0,spread*2-1),readingPageCount()-1),last=Math.min(spread*2,readingPageCount()-1);
   return preferredReaderPage!==null&&preferredReaderPage>=first&&preferredReaderPage<=last?preferredReaderPage:first;
 };
 function updateReaderControls(){
+  if(typeof syncBookFocusView==='function')syncBookFocusView();
   $('#go-page').max=readingPageCount();
   if(document.activeElement!==$('#go-page'))$('#go-page').value=visibleReaderPage()+1;
-  $('#reader-book-name').textContent=bookName;
-  $('#contents-open').disabled=!!motion||!!coverMotion;
+  $('#reader-book-name').textContent=bookShelfMode?'My bookshelf':bookName;
+  $('#contents-open').disabled=bookTableMode||!!motion||!!coverMotion;
+  $('#read-text').disabled=bookTableMode||!!motion||!!coverMotion;
+  const librarySwitch=$('#reader-library-switch');if(librarySwitch){librarySwitch.hidden=!bookTableMode;librarySwitch.textContent=bookShelfMode?'Table view':'Bookshelf';for(const id of ['reader-jump-open','previous','next'])$('#'+id).hidden=bookTableMode;}
   if($('#reading-view').open&&readerKey!==bookName+':'+readerPage+':'+JSON.stringify(bookPage(readerPage)))renderReadingPage();
 }
 function jumpToReaderPage(value){

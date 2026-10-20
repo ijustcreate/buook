@@ -33,10 +33,18 @@ async function renderBookArt(blob,{treatment='pixel-ink',removeWhite=true,smooth
     while(head<tail){const i=queue[head++];d[i*4+3]=0;if(i%c.width)add(i-1);if(i%c.width<c.width-1)add(i+1);add(i-c.width);add(i+c.width);}
   }
   if(treatment!=='original')for(let i=0;i<d.length;i+=4){
-    const l=(d[i]*.2126+d[i+1]*.7152+d[i+2]*.0722)/255,level=Math.round(Math.pow(Math.max(0,Math.min(1,(l-.12)/.76)),.9)*7)/7;
-    d[i]=Math.round(37+level*209);d[i+1]=Math.round(25+level*202);d[i+2]=Math.round(19+level*158);
+    const l=d[i]*.2126+d[i+1]*.7152+d[i+2]*.0722;
+    if(removeWhite&&l<241){
+      const coverage=Math.round(Math.pow(clamp((241-l)/225),1.05)*15)/15;
+      d[i]=46;d[i+1]=32;d[i+2]=23;d[i+3]=Math.round(d[i+3]*coverage*232/255);
+    }else{
+      // Preserve enclosed light details in user artwork. Only the connected
+      // paper is removed; imported printed plates use full ink separation.
+      const level=Math.round(clamp((l/255-.12)/.76)*15)/15;
+      d[i]=Math.round(46+level*200);d[i+1]=Math.round(32+level*195);d[i+2]=Math.round(23+level*154);
+    }
   }
-  p.putImageData(pixels,0,0);return{blob:await canvasArtBlob(c),width:c.width,height:c.height,recipe:{version:2,treatment,removeWhite,smooth,width:c.width,height:c.height}};
+  p.putImageData(pixels,0,0);return{blob:await canvasArtBlob(c),width:c.width,height:c.height,recipe:{version:3,treatment,removeWhite,smooth,width:c.width,height:c.height}};
 }
 
 let pageArtMode=false,artStroke=null,artSelection=null;
