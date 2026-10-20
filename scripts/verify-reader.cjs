@@ -28,7 +28,7 @@ const {chromium,_electron}=require('playwright'),assert=require('node:assert/str
     });
     await page.locator('#contents-open').click();assert.equal(await page.locator('#contents-list button').count(),27);
     await capture('external-contents');await page.locator('#contents-list button').first().click();
-    await page.waitForFunction(()=>spread===3&&!motion&&!queuedTurns.length);
+    await page.waitForFunction(()=>spread===2&&!motion&&!queuedTurns.length);
     assert.equal(await page.locator('#go-page').isVisible(),true);
     await page.locator('#go-page').fill('101');await page.locator('#go-page').press('Enter');await page.waitForFunction(()=>spread===50&&!motion&&!queuedTurns.length);
     await capture('sharp-book');

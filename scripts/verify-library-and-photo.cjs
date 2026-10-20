@@ -12,13 +12,13 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=req
     if(!profile)await page.goto(process.argv[2]||'http://127.0.0.1:4174/');await ready();
     assert.equal(await page.locator('#shelf').evaluate(e=>e.open),true);await capture('startup-shelf');
     const books=await page.evaluate(()=>savedBooks.map(b=>({name:b.name,pageCount:b.pageCount,id:b.id})));
-    assert.equal(books.length,3);
+    assert.equal(books.length,10);
     const geometry=await page.evaluate(()=>{
       const result=[];$('#shelf').close();
       for(const novel of starterLibrary.values()){
         if(novel.legacy)continue;
         openSavedBook(novel.id);const chapters=sectionPages();
-        if(pageCount<100||pageCount>4096||!chapters.length)throw new Error('Novel pagination/contents failed');
+        if(pageCount<8||pageCount>4096||!chapters.length)throw new Error('Novel pagination/contents failed');
         const p=document.createElement('canvas').getContext('2d');
         let lines=0;
         for(const data of Object.values(novel.pages))if(data.novel){
@@ -33,7 +33,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=req
     assert(geometry[0].height>geometry[1].height);assert(geometry.every(b=>b.height<230&&b.openThickness<2.1));
     await page.evaluate(()=>{openSavedBook('starter-frankenstein');bookContent.pages[5]={...bookPage(5),body:'A private edited line'};persistBookContent();saveBook();});
     await page.reload();await ready();
-    assert.equal(await page.evaluate(()=>savedBooks.length),3);
+    assert.equal(await page.evaluate(()=>savedBooks.length),10);
     assert.equal(await page.evaluate(()=>{openSavedBook('starter-frankenstein');return bookPage(5).body;}),'A private edited line');
     const bindings=await page.evaluate(()=>[8,28,498,984,4096].map(pages=>{
       pageCount=pages;spread=Math.floor(spreadCount()/2);motion=null;closedEdge=null;draw();

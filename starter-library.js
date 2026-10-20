@@ -2,18 +2,23 @@
 // Read-only bundled text stays outside localStorage. Only user edits/copies are
 // saved there, so full novels don't consume the browser's shelf quota.
 const starterLibrary=new Map();
+const sourceIllustrations=new Map();
 async function loadStarterLibrary(){
-  const response=await fetch('assets/starter-novels.json?v=2');
-  if(!response.ok)throw new Error('Starter library could not be loaded');
-  const novels=await response.json(),p=document.createElement('canvas').getContext('2d');
+  const designResponse=await fetch('assets/book-designs.json?v=1');if(!designResponse.ok)throw new Error('Book design metadata could not be loaded');
+  const designs=await designResponse.json();
+  const responses=await Promise.all(['assets/starter-novels.json?v=2','assets/classic-library.json?v=1'].map(url=>fetch(url)));
+  if(responses.some(response=>!response.ok))throw new Error('Starter library could not be loaded');
+  const novels=(await Promise.all(responses.map(response=>response.json()))).flat(),p=document.createElement('canvas').getContext('2d');
   p.font='12px Georgia';
   for(const novel of novels){
     const leaves=[],chapters=[],pages={};let lastChapter='';
     for(const [index,text] of novel.textPages.entries()){
-      const heading=text.match(/(?:^|\n)[ \t]*(?:CHAPTER|Chapter)[ \t]+([IVXLCDM]+|\d+)[ \t]*(?:\n|$)/);
+      const marker=novel.chapters?.find(chapter=>chapter.page===index);
+      const heading=!novel.chapters&&text.match(/(?:^|\n)[ \t]*(?:CHAPTER|Chapter)[ \t]+([IVXLCDM]+|\d+)[ \t]*(?:\n|$)/);
       const section=heading&&heading[1]!==lastChapter;
       if(section){chapters.push({index:leaves.length,page:index,title:'Chapter '+heading[1]});lastChapter=heading[1];}
-      pages[index]={role:section?'section':'body',tocLabel:section?'Chapter '+heading[1]:'',novel:true,font:'serif',title:'',eyebrow:novel.name,body:text,sourcePage:index+1};
+      pages[index]={role:marker||section?'section':'body',tocLabel:marker?.title||(section?'Chapter '+heading[1]:''),novel:true,preserveLines:!!novel.preserveLines,font:'serif',title:'',eyebrow:novel.name,body:text,sourcePage:index+1};
+      if(novel.chapters)continue;
       if(!text)continue;
       let lines=[],line='';
       for(const word of text.split(/\s+/)){
@@ -27,6 +32,12 @@ async function loadStarterLibrary(){
     const pageCount=Math.ceil(novel.sourcePages/2)*2;
     if(pageCount>novel.sourcePages)pages[novel.sourcePages]={role:'body',novel:true,font:'serif',body:'',title:'',padding:true};
     starterLibrary.set(novel.id,{...common,id:'starter-'+novel.id,starterId:novel.id,edition:2,pageCount,sourcePageCount:novel.sourcePages,pages});
+    const design=designs[novel.id];
+    if(design){
+      if(design.contents.length)starterLibrary.get(novel.id).contents=design.contents;
+      for(const [number,data] of Object.entries(design.pages))Object.assign(pages[number],data);
+    }
+    if(novel.chapters)continue;
     // Preserve the former base text for any edits/bookmarks on old numbering.
     const old={},tocPages=Math.max(1,Math.ceil(chapters.length/9)),start=1+tocPages;
     old[0]={role:'title',title:novel.name+'\n'+novel.author,font:'serif',body:'',eyebrow:''};
@@ -36,6 +47,8 @@ async function loadStarterLibrary(){
     let count=start+leaves.length;if(count%2)old[count++]={role:'body',novel:true,body:'',title:''};
     starterLibrary.set(novel.id+'-legacy',{...common,starterId:novel.id+'-legacy',edition:1,pageCount:count,pages:old,legacy:true});
   }
+  const figures=Object.values(designs).flatMap(design=>Object.values(design.pages).flatMap(page=>page.sourceFigures||[]));
+  await Promise.all(figures.map(async figure=>{const img=new Image();img.src=figure.src;await img.decode();sourceIllustrations.set(figure.src,img);}));
 }
 function migrateStarterEditions(){
   let changed=false;

@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.21 — 2026-10-20
+
+- Add seven PDF-sourced classics: The Picture of Dorian Gray, Peter Pan (Peter and Wendy), the complete Longfellow Divine Comedy, The Time Machine, Common Sense, The Secret Garden, and Romeo and Juliet.
+- Retain each source PDF's page boundaries, add chapter/part/scene links, and preserve verse and dialogue line breaks.
+- Seed newly added catalog books into existing shelves without overwriting private edits or restoring previously deleted starter books.
+- Keep public-domain text outside localStorage and retain PDF provenance/download links without bundling publisher artwork or branding.
+- Recover native PDF destinations and hierarchy for structured clickable contents, including all three Frankenstein contents pages, volumes, letters and repeated chapter names.
+- Compose centered title/author pages and separate chapter headings; clean repeated Frankenstein running heads and blank Roman-folio versos without repagination.
+- Restore Dracula's 28 source image-bearing pages with aspect-correct page-bound illustrations and accessible reader images.
+- Resample curved leaves by material arc length to distribute texture scale evenly instead of concentrating magnification near the binding; retain shared keep-sake and TOC mapping.
+- Create and validate the local `pixel-book-pdf-design` skill for future imports and edition-quality checks.
+
 ## 1.0.20 — 2026-10-20
 
 - Match page-number lettering to the book's selected font, including the default novel serif, while preserving folio placement and PDF numbering.

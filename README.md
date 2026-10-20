@@ -10,11 +10,35 @@ No installation or account is required. The browser version uses the same book r
 
 The approved working checkpoint is **v1.0.11**. The app displays **Pixel Book**; Windows installers/executables retain their legacy **The Book** identifier. The application ID and save location are intentionally unchanged so existing books keep working.
 
-The current development version is **v1.0.20**, adding live book-wide font selection and matching page-number lettering from the user's font collection, alongside PDF-aligned pagination, sharper on-book text, an adjustable large-text reader, external contents/page navigation and full cover colour pickers. It retains shelf-first startup, three starter books, up to 4,096 pages, natural photo tugging and the upright ornate 3D spine. The `v1.0.11` checkpoint is preserved unchanged. The original `buook` web address and desktop profile remain unchanged to preserve saved books.
+The current development version is **v1.0.21**, adding seven PDF-sourced classics, structured clickable PDF contents, centered title compositions, restored source illustrations and evenly spaced material mapping across curved pages. It retains live book-wide font selection and matching page numbers, PDF-aligned pagination, sharper on-book text, an adjustable large-text reader, external contents/page navigation and full cover colour pickers. There are now ten starter books, up to 4,096 pages per book, natural photo tugging and the upright ornate 3D spine. The `v1.0.11` checkpoint is preserved unchanged. The original `buook` web address and desktop profile remain unchanged to preserve saved books.
 
 The novel text follows the supplied PDFs page for page, including blanks: **Dracula has 509 reading pages; Frankenstein has 268**. Dracula's physical binding has one extra blank reverse, excluded from reading-page counts. Original text-extraction artifacts may remain. Older expanded editions with edits or bookmarks are preserved as a separate “previous pagination” shelf copy during migration. Bundled novel text stays outside localStorage; your edits, copies and shelf remain local.
 
 Use **Contents** above the book to select a chapter, or the always-visible **Page / Go** box beneath it to jump to a PDF page number. **Read text** opens selectable, unwarped text with adjustable 18–34 px type and previous/next page buttons; returning to the book navigates to that same page. The main novel renderer also uses higher-resolution text without changing the original PDF's page boundaries. Outside and inside covers use native full-colour pickers.
+
+### Added classics and source PDFs
+
+These seven editions are added once to existing shelves without replacing edits, copies, fonts or bookmarks. Deleting one keeps it deleted on subsequent launches. Counts include source front matter and blank pages, not just printed folios; an odd-length PDF gets a blank physical reverse that is not counted as a reading page. Dante's verse and Shakespeare's dialogue retain line breaks. The complete English Divine Comedy uses Henry Wadsworth Longfellow's 1867 translation.
+
+| Book | Author | PDF pages | Source PDF |
+| --- | --- | ---: | --- |
+| The Picture of Dorian Gray | Oscar Wilde | 138 | [Download](https://www.globalgreyebooks.com/ebooks/oscar-wilde_picture-of-dorian-gray.pdf) |
+| Peter Pan (Peter and Wendy) | J. M. Barrie | 100 | [Download](https://www.globalgreyebooks.com/ebooks/james-m-barrie_peter-pan.pdf) |
+| The Divine Comedy | Dante Alighieri | 410 | [Download](https://www.globalgreyebooks.com/ebooks2/dante-alighieri_divine-comedy.pdf) |
+| The Time Machine | H. G. Wells | 60 | [Download](https://www.globalgreyebooks.com/ebooks/h-g-wells_time-machine.pdf) |
+| Common Sense | Thomas Paine | 27 | [Download](https://loveman.sdsu.edu/docs/1776ThomasPaine.pdf) |
+| The Secret Garden | Frances Hodgson Burnett | 151 | [Download](https://www.globalgreyebooks.com/ebooks/frances-hodgson-burnett_secret-garden.pdf) |
+| Romeo and Juliet | William Shakespeare | 114 | [Download](https://www.globalgreyebooks.com/ebooks/william-shakespeare_romeo-and-juliet.pdf) |
+
+The app bundles public-domain text, not the publishers' PDF artwork or branding. Source PDFs are kept locally under `release/library-pdfs/` when running `scripts/import-online-library.py`; they are not uploaded in the app build. [Global Grey's usage terms](https://www.globalgreyebooks.com/terms-conditions.html) permit reuse of these public-domain texts with their branding removed. Sources and file hashes are retained in `assets/classic-library.json` for provenance. The Common Sense source is hosted by San Diego State University.
+
+### PDF book design
+
+`scripts/design-pdf-library.py` reads source outlines, named destinations, placed images and contents annotations into `assets/book-designs.json`. Frankenstein's original three contents pages are rebuilt as aligned clickable rows with their original printed references; targets use real PDF page objects, not guessed offsets. The external Contents includes its Preface, volumes, letters and repeated chapter names with volume context. Source page counts remain unchanged.
+
+Title pages receive centered title/author compositions, chapter openings have a distinct heading hierarchy, blank Roman-folio versos stay blank, and repeated Frankenstein running heads are removed from prose. Dracula's 28 image-bearing pages are restored as page-bound artwork with their original proportions and accessible-reader alt text. Modern third-party publisher covers and branding are not bundled. Full PDFs remain external source files; this is a semantic import, not a rasterization of every text page.
+
+The curved page chain is spaced by material arc length so equal source columns no longer expand sharply at the binding. Text, artwork, keepsakes and contents hit areas share the same page mapping. A reusable local Codex skill, `pixel-book-pdf-design`, records the import decisions and release checks for subsequent editions.
 
 ### Live fonts
 
@@ -124,6 +148,8 @@ node scripts/verify-spine-presentation.cjs http://127.0.0.1:4174/
 node scripts/verify-library-and-photo.cjs http://127.0.0.1:4174/
 node scripts/verify-reader.cjs http://127.0.0.1:4174/
 node scripts/verify-fonts.cjs http://127.0.0.1:4174/
+node scripts/verify-classic-library.cjs http://127.0.0.1:4174/
+node scripts/verify-pdf-design.cjs http://127.0.0.1:4174/
 node scripts/verify-edge-bookmarks.cjs http://127.0.0.1:4174/
 ```
 

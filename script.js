@@ -306,10 +306,19 @@ function viewport(number) {
   if(!blank) {
     const font=hasBookFont()?'book':custom.font||'pixel',inkColor=custom.ink||'#5b3e2d';
     const role=pageRole(number),title=custom.title??entry[1];
-    if(custom.novel){
-      const layout=layoutNovelText(custom.body||'',p);
+    if(custom.novel&&custom.titlePage){
+      drawSourceTitle(p,custom.titlePage);
+    }else if(custom.novel&&custom.tocRows){
+      drawSourceContents(p,number);
+    }else if(custom.novel){
+      let bodyTop=drawSourceFigures(p,custom),body=custom.body||'';
+      if(custom.chapterOpening&&body.startsWith(custom.chapterOpening)){
+        p.save();p.font='18px '+bookFontFamily();p.fillStyle=inkColor;p.textAlign='center';p.textBaseline='top';p.fillText(custom.chapterOpening,200,38,304);p.restore();
+        body=body.slice(custom.chapterOpening.length).trim();bodyTop=Math.max(bodyTop,77);
+      }
+      const layout=layoutNovelText(body,p,custom.preserveLines,312-bodyTop);
       p.fillStyle=custom.ink||'#302019';p.font=layout.size+'px '+bookFontFamily();p.textBaseline='top';
-      layout.lines.forEach((line,i)=>p.fillText(line,45,38+i*layout.lineHeight));
+      layout.lines.forEach((line,i)=>p.fillText(line,45,bodyTop+i*layout.lineHeight));
       drawPageNumber(p,number,custom.pageNumberPlacement||'bottom-center',hand);
     } else if(role==='contents') {
       p.fillStyle=inkColor;ink(p,'CONTENTS',45,31,1.05,hand);
@@ -389,6 +398,14 @@ function drawPageNumber(p,number,placement,hand) {
 
 function registerTocAreas(page,chain,side) {
   if(pageRole(page)!=='contents')return;
+  if(bookPage(page).tocRows){
+    for(const row of sourceContentsLayout(page)){
+      const corners=[[row.x,row.y],[row.x+row.w,row.y],[row.x+row.w,row.y+row.h],[row.x,row.y+row.h]].map(([x,y])=>project(sampleChain(chain,side<0?1-x/PAGE_W:x/PAGE_W),y/PAGE_H));
+      const xs=corners.map(p=>p.x),ys=corners.map(p=>p.y);
+      tocHitAreas.push({page,row:page*100+row.index,target:row.target,x:Math.min(...xs),y:Math.min(...ys),w:Math.max(...xs)-Math.min(...xs),h:Math.max(...ys)-Math.min(...ys)});
+    }
+    return;
+  }
   const chapters=sectionPages(),start=Math.max(0,(page-1)*9);
   chapters.slice(start,start+9).forEach((chapter,index)=>{
     const y=(136+index*21)/PAGE_H,v=y+10/PAGE_H,a=38/PAGE_W,b=364/PAGE_W;
@@ -415,7 +432,7 @@ const defaultSections={2:'The road',4:'Field notes',8:'The reedbeds',12:'Pack & 
 function bookPage(number){return bookContent.pages[number]||starterLibrary.get(bookContent.starterId)?.pages[number]||{};}
 function pageRole(number){const custom=bookPage(number);return custom.role||(number===0?'title':number===1?'contents':defaultSections[number]?'section':'body');}
 function automaticFolio(number){if(bookContent.sourcePageCount)return number+1;let count=0;for(let i=0;i<=number;i++)if(pageRole(i)!=='title'&&pageRole(i)!=='contents')count++;return count;}
-function sectionPages(){return Array.from({length:pageCount},(_,page)=>({page,role:pageRole(page),label:bookPage(page).tocLabel||(bookPage(page).title||entries[page%entries.length][1]).replace(/\n/g,' ')})).filter(x=>x.role==='section');}
+function sectionPages(){const source=starterLibrary.get(bookContent.starterId)?.contents;if(source)return source;return Array.from({length:pageCount},(_,page)=>({page,role:pageRole(page),label:bookPage(page).tocLabel||(bookPage(page).title||entries[page%entries.length][1]).replace(/\n/g,' ')})).filter(x=>x.role==='section');}
 
 function getUserImage(source,number) {
   if(!source)return null;
@@ -504,7 +521,15 @@ function resting(side, amount) {
     const rolledX=u<radius?PAGE_W*radius*t*t*(2-t):PAGE_W*u;
     chain.push({x:side*mix(x,rolledX,bindingRoll(amount)),z,u});
   }
-  return chain;
+  // Equal material distances must occupy equal texture widths. The former
+  // spline parameter sped up near the binding, locally magnifying lettering.
+  const distances=[0];for(let i=1;i<chain.length;i++)distances.push(distances[i-1]+Math.hypot(chain[i].x-chain[i-1].x,chain[i].z-chain[i-1].z));
+  const total=distances.at(-1);let index=0;
+  return Array.from({length:SEGMENTS+1},(_,i)=>{
+    const distance=total*i/SEGMENTS;while(index<SEGMENTS-1&&distances[index+1]<distance)index++;
+    const t=(distance-distances[index])/(distances[index+1]-distances[index]||1);
+    return{x:mix(chain[index].x,chain[index+1].x,t),z:mix(chain[index].z,chain[index+1].z,t),u:i/SEGMENTS,profileU:mix(chain[index].u,chain[index+1].u,t)};
+  });
 }
 
 function turnChain(direction,progress) {
@@ -724,7 +749,7 @@ function stacks(chain,side,amount,number=side>0?0:1) {
   const upper=(p,v)=>project(p,v*paperBottomV(number,side,p.u));
   const lower=(p,v)=>{
     const edgeV=v*paperBottomV(number,side,p.u),point=upper(p,v),perspective=pagePerspective(edgeV);
-    return {x:point.x+foreEdge*p.u*perspective.scale,y:point.y+layerDepth(load,p.u)*mix(.55,1,perspective.vertical)};
+    return {x:point.x+foreEdge*p.u*perspective.scale,y:point.y+layerDepth(load,p.profileU??p.u)*mix(.55,1,perspective.vertical)};
   };
   // Surface leaves are contained inside the common block, not painted across
   // its front face. All layers use the same projected depth and outer corner.
@@ -732,7 +757,7 @@ function stacks(chain,side,amount,number=side>0?0:1) {
   for(let k=leafCount;k>=1;k--) {
     const fraction=k/(leafCount+1);
     const under=chain.map(p=>({...p,x:p.x+foreEdge*fraction*p.u,
-      z:elevationZ(pageElevation(p.z)-layerDepth(load,p.u)*fraction)}));
+      z:elevationZ(pageElevation(p.z)-layerDepth(load,p.profileU??p.u)*fraction)}));
     mesh(under,paperSurface(number+side*2*k),side,.05);
   }
   // The vertical fore-edge and bottom ribbon meet at the exact same point.
@@ -1652,9 +1677,16 @@ $('#clear-art').onclick=()=>$('#pixel-art').getContext('2d').clearRect(0,0,400,3
 $('#save-art').onclick=()=>{const page=currentPage();if(!page)return;const data=$('#pixel-art').toDataURL('image/png');if(pixelMode==='image'&&page.images?.[selectedPageImage])page.images[selectedPageImage].src=data;else page.art=data;persistEditedPage();};
 
 function seedStarterBooks(){
-  if(localStorage.getItem('pixel-book-starters-v1'))return;
-  for(const starter of starterLibrary.values())if(!starter.legacy&&!savedBooks.some(book=>book.id===starter.id))savedBooks.push({...starter,pages:{}});
-  if(!savedBooks.some(book=>book.id==='starter-keeper'))savedBooks.push({id:'starter-keeper',name:'The Keeper’s Book',pageCount:28,pages:{},covers:{front:{},back:{}},palette:{outside:'#65402e',inside:'#c85e68',metal:'gold'}});
+  // Track individual catalog additions, so updates reach existing shelves but
+  // previously deleted starters stay deleted. Never overwrite saved book edits.
+  let known;try{known=JSON.parse(localStorage.getItem('pixel-book-seeded-catalog-v1'));}catch{}
+  const seeded=new Set(Array.isArray(known)?known:localStorage.getItem('pixel-book-starters-v1')?['starter-dracula','starter-frankenstein','starter-keeper']:[]);
+  for(const starter of starterLibrary.values())if(!starter.legacy&&!seeded.has(starter.id)){
+    if(!savedBooks.some(book=>book.id===starter.id||book.starterId===starter.starterId))savedBooks.push({...starter,pages:{}});
+    seeded.add(starter.id);
+  }
+  if(!seeded.has('starter-keeper')&&!savedBooks.some(book=>book.id==='starter-keeper'))savedBooks.push({id:'starter-keeper',name:'The Keeper’s Book',pageCount:28,pages:{},covers:{front:{},back:{}},palette:{outside:'#65402e',inside:'#c85e68',metal:'gold'}});
+  seeded.add('starter-keeper');localStorage.setItem('pixel-book-seeded-catalog-v1',JSON.stringify([...seeded]));
   localStorage.setItem('keepers-book-shelf-v1',JSON.stringify(savedBooks));localStorage.setItem('pixel-book-starters-v1','1');
 }
 function renderShelf(){
